@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 interface BillJobData {
     txHash: string;
     chainId: number;
+    connectedWallet?: string;
 }
 
 // Reuse the Redis connection for efficiency if needed, but BullMQ manages its own connections by default

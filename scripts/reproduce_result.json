@@ -1,0 +1,19 @@
+{
+  "from": "0x9c048cfd94e09CBBC4E7060C3Ce3d6Acff0933B9",
+  "to": "0x903b8a6c26afD8C20A91C988266ef93c1D52640f",
+  "items": [
+    {
+      "direction": "out",
+      "isIn": false,
+      "tokenIcon": "💎",
+      "tokenSymbol": "ETH",
+      "fromShort": "0x9c04...33B9",
+      "toShort": "0x903b...640f",
+      "amountFormatted": "0.000371",
+      "usdValue": "$1.10"
+    }
+  ],
+  "fee_usd": "< $0.01",
+  "fee_native": "0.000001",
+  "native_price_source": "DeFiLlama"
+}

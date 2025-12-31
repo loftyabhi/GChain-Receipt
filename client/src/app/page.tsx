@@ -31,7 +31,11 @@ export default function Home() {
       const response = await fetch('http://localhost:3002/api/v1/bills/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ txHash, chainId })
+        body: JSON.stringify({
+          txHash,
+          chainId,
+          connectedWallet: address // Pass connected wallet to determine IN/OUT direction
+        })
       });
 
       const data = await response.json();

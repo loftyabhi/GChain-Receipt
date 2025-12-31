@@ -4,6 +4,7 @@ import { BillService } from '../services/BillService';
 interface BillJobData {
     txHash: string;
     chainId: number;
+    connectedWallet?: string;
 }
 
 const connection = {

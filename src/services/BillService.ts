@@ -9,6 +9,7 @@ import { ERC20_ABI, ERC721_ABI, ERC1155_ABI } from '../abis/Common';
 interface BillRequest {
     txHash: string;
     chainId: number;
+    connectedWallet?: string;
 }
 
 export class BillService {
@@ -30,10 +31,13 @@ export class BillService {
     private getRpcUrl(chainId: number): string {
         const alchemyKey = process.env.ALCHEMY_API_KEY;
 
+        // Force public RPC for mainnet debugging due to limits
+        if (chainId === 1) return 'https://eth.llamarpc.com';
+
         // If Alchemy Key exists, try to use it for supported chains
         if (alchemyKey) {
             switch (chainId) {
-                case 1: return `https://eth-mainnet.g.alchemy.com/v2/${alchemyKey}`;
+                // case 1: return `https://eth-mainnet.g.alchemy.com/v2/${alchemyKey}`;
                 case 8453: return `https://base-mainnet.g.alchemy.com/v2/${alchemyKey}`;
                 case 137: return `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`;
                 case 42161: return `https://arb-mainnet.g.alchemy.com/v2/${alchemyKey}`;
@@ -71,19 +75,12 @@ export class BillService {
         const block = await provider.getBlock(receipt.blockNumber);
         if (!block) throw new Error('Block not found');
 
-        // 2. Classify Transaction & Resolve Names
-        const isNativeSend = tx.data === '0x' && tx.value > 0n;
-
-        console.log("Resolving ENS names...");
-        const [fromName, toName] = await Promise.all([
-            this.resolveName(tx.from, mainnetProvider),
-            tx.to ? this.resolveName(tx.to, mainnetProvider) : Promise.resolve(null)
-        ]);
-        console.log(`ENS Results - From: ${fromName}, To: ${toName}`);
+        // 2. Classify Transaction first to determine User Address
+        // (Moved ENS resolution to after userAddress determination)
 
         // 3. Resolve Prices & Fees
         const timestamp = block.timestamp;
-        const nativePriceData = await this.oracle.getPrice(chainId, 'native', timestamp);
+        const nativePriceData = await this.oracle.getPrice(chainId, 'native', timestamp, receipt.blockNumber);
 
         // Calculate Fees
         const gasUsed = receipt.gasUsed;
@@ -107,7 +104,7 @@ export class BillService {
         let swapData: any = {};
 
         // 4.0 Advanced Transaction Classification
-        const { transactionClassifier } = require('./TransactionClassifier');
+        const { transactionClassifier, TransactionEnvelopeType } = require('./TransactionClassifier');
         const classification = await transactionClassifier.classify(receipt, tx, chainId);
 
         console.log(`Classification: ${classification.type} (${Math.round(classification.confidence * 100)}% confidence)`);
@@ -141,170 +138,152 @@ export class BillService {
         };
 
         // Items Construction - Parse ALL transfers from logs
-        const items = [];
-        let totalIn = 0;
-        let totalOut = 0;
-        let tokensInCount = 0;
-        let tokensOutCount = 0;
+        console.log('DEBUG: request.connectedWallet', request.connectedWallet);
+        console.log('DEBUG: tx.from', tx.from);
 
-        const userAddress = tx.from.toLowerCase();
+        // Resolve User Address:
+        // 1. Connected Wallet (if provided and matches tx) - Actually, usually we trust connected wallet if involved.
+        // 2. Parsed Sender from Classification (e.g. AA UserOp sender).
+        // 3. Transaction From (EOA).
+        let userAddress = request.connectedWallet?.toLowerCase();
+
+        if (!userAddress) {
+            if (classification.details?.sender) {
+                userAddress = classification.details.sender.toLowerCase();
+                console.log('DEBUG: Used AA Sender from Classification:', userAddress);
+            } else {
+                userAddress = tx.from.toLowerCase();
+            }
+        }
+
+        // Ensure we handle the case where connectedWallet is provided but we found a more specific sender?
+        // Actually, if connectedWallet IS provided, we usually want to generate the bill FOR that wallet.
+        // But if the bill logic relies on "is this wallet involved?", correct parsing matters.
+        // If connectedWallet was passed (e.g. from frontend), keep it. 
+        // But for the "From" field in the PDF, we might need the actual sender.
+        // Let's stick to: if connectedWallet is set, use it. If not, fallback to AA sender -> tx.from.
+        // Wait, the reproduction script passed connectedWallet. 
+        // And the result showed "From: 0x9c04" (which was NOT the connected wallet).
+        // This implies `request.connectedWallet` might have been ignored or overwritten?
+        // Line 151: `let userAddress = request.connectedWallet?.toLowerCase() || tx.from.toLowerCase();`
+        // In the reproduction script, I passed `connectedWallet`.
+        // So `userAddress` SHOULD have been `0xb37a...`.
+        // Why did `reproduce_result.json` show `0x9c04`?
+        // Ah, `BillService` might NOT be using `userAddress` to populate the `reproduce_result` "from" field?
+        // Let's check where `reproduce_result` gets its data in the script.
+        // `script/reproduce_issue.ts`:
+        // `const bill = await billService.generateBill(...)`
+        // `const result = { from: bill.from, ... }`
+        // So `bill.from` was `0x9c04`.
+        // We need to ensure `bill.from` is set to the resolved `userAddress`.
+
+        // Let's update the logic to be more robust:
+        if (!request.connectedWallet) {
+            if (classification.details?.sender) {
+                userAddress = classification.details.sender.toLowerCase();
+            } else {
+                userAddress = tx.from.toLowerCase();
+            }
+        }
+
+        // Final fallback to ensure string type
+        if (!userAddress) userAddress = tx.from.toLowerCase();
+
+        console.log('DEBUG: Resolved userAddress', userAddress);
+
+        // Resolve ENS Names
+        // fromName should correspond to the Bill Sender (Originator)
+        const billSenderAddress = classification.details?.sender || tx.from;
+
+        console.log("Resolving ENS names...");
+        const [fromName, toName] = await Promise.all([
+            this.resolveName(billSenderAddress, mainnetProvider),
+            tx.to ? this.resolveName(tx.to, mainnetProvider) : Promise.resolve(null)
+        ]);
+        console.log(`ENS Results - From: ${fromName}, To: ${toName}`);
+
         const logs = receipt.logs || [];
 
-        // 1. Parse ERC-20 Transfers
-        const erc20TransferTopic = erc20Interface.getEvent('Transfer')?.topicHash;
-        const erc20Logs = logs.filter(log => log.topics[0] === erc20TransferTopic && log.topics.length === 3);
+        // For AA transactions, actions by tx.from (Bundler) should attribute to User
+        const aliasAddress = classification.type === 'account_abstraction' ? tx.from.toLowerCase() : undefined;
 
-        for (const log of erc20Logs) {
-            try {
-                const parsed = erc20Interface.parseLog(log);
-                if (!parsed) continue;
+        let { items, totalIn, totalOut, tokensInCount, tokensOutCount } = await this.parseTokenMovements(
+            logs, userAddress, chainId, receipt.blockNumber, provider, timestamp, aliasAddress
+        );
 
-                const from = parsed.args[0].toLowerCase();
-                const to = parsed.args[1].toLowerCase();
-                const amount = parsed.args[2];
+        // Fallback for Smart Wallets: If no movements found for sender, check if recipient has movements
+        // BUT skip if we already identified a specific AA Sender (we trust our classification)
+        if (items.length === 0 && tx.to && tx.to.toLowerCase() !== userAddress && !classification.details?.sender) {
+            // Custom: Check if sender is a contract (Exchange/Withdrawal)
+            const code = await provider.getCode(tx.from);
+            let perspectiveAddress = userAddress;
 
-                // Only show transfers involving the user
-                if (from === userAddress || to === userAddress) {
-                    const isIn = to === userAddress;
-                    const amountFormatted = ethers.formatUnits(amount, 18); // Assuming 18 decimals
+            if (code !== '0x') {
+                console.log(`Sender ${userAddress} is a contract. Checking recipient ${tx.to}...`);
+                perspectiveAddress = tx.to!.toLowerCase();
+            } else {
+                console.log(`No movements for sender ${userAddress}, checking recipient ${tx.to}...`);
+                perspectiveAddress = tx.to!.toLowerCase();
+            }
 
-                    // Fetch token price at transaction block
-                    const tokenPrice = await this.getTokenPriceAtBlock(log.address, chainId, receipt.blockNumber);
-                    const usdValue = tokenPrice > 0 ? (parseFloat(amountFormatted) * tokenPrice).toFixed(2) : "0.00";
+            const fallbackResult = await this.parseTokenMovements(logs, perspectiveAddress, chainId, receipt.blockNumber, provider, timestamp, aliasAddress);
 
-                    items.push({
-                        direction: isIn ? 'in' : 'out',
-                        isIn: isIn,
-                        tokenIcon: isIn ? '📥' : '📤',
-                        tokenSymbol: `Token`, // TODO: Fetch symbol from contract
-                        tokenAddress: log.address,
-                        fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
-                        toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
-                        amountFormatted: parseFloat(amountFormatted).toFixed(6),
-                        usdValue: `$${usdValue}`
-                    });
-
-                    // Update totals
-                    if (isIn) {
-                        tokensInCount++;
-                        totalIn += parseFloat(usdValue);
-                    } else {
-                        tokensOutCount++;
-                        totalOut += parseFloat(usdValue);
-                    }
-                }
-            } catch (e) {
-                console.log('Failed to parse ERC-20 transfer:', e);
+            if (fallbackResult.items.length > 0) {
+                console.log(`Found movements for recipient ${perspectiveAddress}, using as primary view.`);
+                items = fallbackResult.items;
+                totalIn = fallbackResult.totalIn;
+                totalOut = fallbackResult.totalOut;
+                tokensInCount = fallbackResult.tokensInCount;
+                tokensOutCount = fallbackResult.tokensOutCount;
+                // NOTE: We do NOT update 'userAddress' so the Bill Header remains "From: <User>"
             }
         }
 
-        // 2. Parse ERC-721 (NFT) Transfers
-        const erc721Logs = logs.filter(log => log.topics[0] === erc20TransferTopic && log.topics.length === 4);
-
-        for (const log of erc721Logs) {
-            try {
-                const parsed = erc721Interface.parseLog(log);
-                if (!parsed) continue;
-
-                const from = parsed.args[0].toLowerCase();
-                const to = parsed.args[1].toLowerCase();
-                const tokenId = parsed.args[2].toString();
-
-                if (from === userAddress || to === userAddress) {
-                    const isIn = to === userAddress;
-                    items.push({
-                        direction: isIn ? 'in' : 'out',
-                        isIn: isIn,
-                        tokenIcon: '🖼️',
-                        tokenSymbol: `NFT #${tokenId}`,
-                        tokenAddress: log.address,
-                        fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
-                        toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
-                        amountFormatted: "1",
-                        usdValue: "$0.00"
-                    });
-                    if (isIn) tokensInCount++; else tokensOutCount++;
-                }
-            } catch (e) {
-                console.log('Failed to parse ERC-721 transfer:', e);
-            }
-        }
-
-        // 2.5 Parse ERC-1155 Transfers (Common on L2s like Base)
-        const erc1155Interface = new ethers.Interface(ERC1155_ABI);
-        const singleTopic = erc1155Interface.getEvent('TransferSingle')?.topicHash;
-        const batchTopic = erc1155Interface.getEvent('TransferBatch')?.topicHash;
-
-        const erc1155Logs = logs.filter(log => log.topics[0] === singleTopic || log.topics[0] === batchTopic);
-
-        for (const log of erc1155Logs) {
-            try {
-                const parsed = erc1155Interface.parseLog(log);
-                if (!parsed) continue;
-
-                const from = parsed.args[1].toLowerCase(); // args[1] is from
-                const to = parsed.args[2].toLowerCase();   // args[2] is to
-
-                if (from === userAddress || to === userAddress) {
-                    const isIn = to === userAddress;
-
-                    if (parsed.name === 'TransferSingle') {
-                        const id = parsed.args[3].toString();
-                        const value = parsed.args[4].toString();
-
-                        items.push({
-                            direction: isIn ? 'in' : 'out',
-                            isIn: isIn,
-                            tokenIcon: '📦',
-                            tokenSymbol: `ID #${id}`,
-                            tokenAddress: log.address,
-                            fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
-                            toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
-                            amountFormatted: value,
-                            usdValue: "$0.00"
-                        });
-                        if (isIn) tokensInCount++; else tokensOutCount++;
-
-                    } else if (parsed.name === 'TransferBatch') {
-                        const ids = parsed.args[3];
-                        const values = parsed.args[4];
-
-                        for (let i = 0; i < ids.length; i++) {
-                            items.push({
-                                direction: isIn ? 'in' : 'out',
-                                isIn: isIn,
-                                tokenIcon: '📦',
-                                tokenSymbol: `ID #${ids[i]}`,
-                                tokenAddress: log.address,
-                                fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
-                                toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
-                                amountFormatted: values[i].toString(),
-                                usdValue: "$0.00"
-                            });
-                            if (isIn) tokensInCount++; else tokensOutCount++;
-                        }
-                    }
-                }
-            } catch (e) {
-                console.log('Failed to parse ERC-1155 transfer:', e);
+        // Observer Fallback: If still no items, check the Sender (tx.from)
+        // This happens if I am an observer (userAddress != tx.from) and the recipient fallback failed or yielded nothing.
+        if (items.length === 0 && userAddress !== tx.from.toLowerCase()) {
+            console.log(`Observer Mode: No movements found for viewer or recipient. Showing Sender ${tx.from} perspective.`);
+            const senderResult = await this.parseTokenMovements(logs, tx.from.toLowerCase(), chainId, receipt.blockNumber, provider, timestamp);
+            if (senderResult.items.length > 0) {
+                items = senderResult.items;
+                totalIn = senderResult.totalIn;
+                totalOut = senderResult.totalOut;
+                tokensInCount = senderResult.tokensInCount;
+                tokensOutCount = senderResult.tokensOutCount;
             }
         }
 
         // 3. Add native ETH transfer if value > 0
         const nativeAmount = parseFloat(valueEth);
         if (nativeAmount > 0) {
+            // Determine direction based on the resolved userAddress
+            const isNativeIn = tx.to && userAddress === tx.to.toLowerCase();
+
+            // Fetch Current Price for Item Display
+            const currentNativePrice = await this.oracle.getPrice(chainId, 'native', Math.floor(Date.now() / 1000));
+            const currentNativeValueUSD = (nativeAmount * currentNativePrice.price).toFixed(2);
+
+            // Historic Value for Totals
+            const historicNativeValueUSD = (nativeAmount * nativePriceData.price);
+
             items.push({
-                direction: 'out',
-                isIn: false,
-                tokenIcon: this.getNativeSymbol(chainId) === 'ETH' ? '💎' : '🪙',
+                direction: isNativeIn ? 'in' : 'out',
+                isIn: isNativeIn,
+                tokenIcon: isNativeIn ? '📥' : (this.getNativeSymbol(chainId) === 'ETH' ? '💎' : '🪙'),
                 tokenSymbol: this.getNativeSymbol(chainId),
                 fromShort: `${tx.from.slice(0, 6)}...${tx.from.slice(-4)}`,
                 toShort: `${tx.to?.slice(0, 6)}...${tx.to?.slice(-4)}`,
                 amountFormatted: nativeAmount.toFixed(6),
-                usdValue: `$${valueUSD}`
+                usdValue: `$${currentNativeValueUSD}` // Display Current Value
             });
-            totalOut += valueUSDNum;
-            tokensOutCount++;
+
+            if (isNativeIn) {
+                totalIn += historicNativeValueUSD; // Accumulate Historic Value
+                tokensInCount++;
+            } else {
+                totalOut += historicNativeValueUSD; // Accumulate Historic Value
+                tokensOutCount++;
+            }
         }
 
         console.log(`Detected ${items.length} token movements (${tokensInCount} in, ${tokensOutCount} out)`);
@@ -342,10 +321,19 @@ export class BillService {
             TYPE_READABLE: transactionClassifier.getReadableType(classification.type),
             TYPE_ICON: transactionClassifier.getTypeIcon(classification.type),
 
+            // Advanced Classification Details
+            IS_MULTISIG: classification.details.isMultiSig || false,
+            IS_SMART_ACCOUNT: classification.type === 'account_abstraction',
+            ENVELOPE_TYPE: classification.envelopeType !== undefined ? this.getEnvelopeLabel(classification.envelopeType, TransactionEnvelopeType) : undefined,
+            ENVELOPE_LABEL: classification.envelopeType !== undefined ? this.getEnvelopeLabel(classification.envelopeType, TransactionEnvelopeType) : '',
+            EXECUTION_METHOD: classification.details.method ? classification.details.method.slice(0, 10) : undefined,
+            PROTOCOL_TAG: classification.protocol ? classification.protocol.toUpperCase() : undefined,
+
             // Participants
-            FROM_ADDRESS: tx.from,
-            FROM_ENS: fromName,
-            FROM_AVATAR: getAvatar(tx.from, fromName),
+            // FROM_ADDRESS should be the Transaction Originator, not necessarily the Connected User
+            FROM_ADDRESS: classification.details?.sender || tx.from,
+            FROM_ENS: fromName, // Note: fromName resolution needs to match this address
+            FROM_AVATAR: getAvatar(classification.details?.sender || tx.from, fromName),
             TO_ADDRESS: tx.to || "Contract Creation",
             TO_ENS: toName,
             TO_AVATAR: getAvatar(tx.to || "0x00", toName),
@@ -391,7 +379,6 @@ export class BillService {
 
             // Ad Support
             hasAd: !!randomAd,
-            adContent: randomAd ? randomAd.contentHtml : "",
             adLink: randomAd ? randomAd.clickUrl : ""
         };
 
@@ -582,5 +569,205 @@ export class BillService {
             console.error('Failed to fetch token price from Alchemy:', e);
             return 0;
         }
+    }
+    private getEnvelopeLabel(type: number, enumObj: any): string {
+        switch (type) {
+            case enumObj.LEGACY: return 'LEGACY';
+            case enumObj.EIP2930: return 'EIP-2930';
+            case enumObj.EIP1559: return 'EIP-1559';
+            case enumObj.EIP4844: return 'EIP-4844';
+            default: return 'LEGACY';
+        }
+    }
+
+    private async parseTokenMovements(
+        logs: readonly any[],
+        userAddress: string,
+        chainId: number,
+        blockNumber: number,
+        provider: ethers.Provider,
+        timestamp: number,
+        aliasAddress?: string // New: Bundler/Proxy address to treat as User
+    ): Promise<{ items: any[], totalIn: number, totalOut: number, tokensInCount: number, tokensOutCount: number }> {
+        const items = [];
+        let totalIn = 0;
+        let totalOut = 0;
+        let tokensInCount = 0;
+        let tokensOutCount = 0;
+
+        const erc20Interface = new ethers.Interface(ERC20_ABI);
+        const erc721Interface = new ethers.Interface(ERC721_ABI);
+        const erc1155Interface = new ethers.Interface(ERC1155_ABI);
+
+        const erc20TransferTopic = erc20Interface.getEvent('Transfer')?.topicHash;
+        const erc1155SingleTopic = erc1155Interface.getEvent('TransferSingle')?.topicHash;
+        const erc1155BatchTopic = erc1155Interface.getEvent('TransferBatch')?.topicHash;
+
+        // Simple cache for token metadata within this transaction
+        const tokenCache: { [address: string]: { symbol: string, decimals: number } } = {};
+
+        const isUserOrAlias = (addr: string) => addr === userAddress || (aliasAddress && addr === aliasAddress);
+
+        for (const log of logs) {
+            // ERC20 & ERC721 check (both use Transfer event)
+            if (log.topics[0] === erc20TransferTopic) {
+                if (log.topics.length === 3) {
+                    // ERC20
+                    try {
+                        const parsed = erc20Interface.parseLog(log);
+                        if (!parsed) continue;
+                        const from = parsed.args[0].toLowerCase();
+                        const to = parsed.args[1].toLowerCase();
+                        const amount = parsed.args[2];
+
+                        if (isUserOrAlias(from) || isUserOrAlias(to)) {
+                            const isIn = isUserOrAlias(to);
+
+                            // Fetch Token Metadata
+                            if (!tokenCache[log.address]) {
+                                const tokenContract = new ethers.Contract(log.address, ERC20_ABI, provider);
+                                try {
+                                    const [symbol, decimals] = await Promise.all([
+                                        tokenContract.symbol().catch(() => 'TOKEN'),
+                                        tokenContract.decimals().catch(() => 18n) // default to 18 if fails
+                                    ]);
+                                    tokenCache[log.address] = {
+                                        symbol: symbol,
+                                        decimals: Number(decimals)
+                                    };
+                                } catch (e) {
+                                    tokenCache[log.address] = { symbol: 'TOKEN', decimals: 18 };
+                                }
+                            }
+
+                            const { symbol, decimals } = tokenCache[log.address];
+                            const amountFormatted = ethers.formatUnits(amount, decimals);
+
+                            // Use Oracle Service
+                            let displayUsdValue = "0.00";
+                            let historicUsdValue = 0;
+
+                            try {
+                                // Fetch BOTH Historic and Current prices
+                                // Note: Current price doesn't need blockNumber (or uses 'latest' implicitly by not passing it? NO, new signature needs arg. Pass undefined)
+                                const [historicPriceData, currentPriceData] = await Promise.all([
+                                    this.oracle.getPrice(chainId, log.address, timestamp, blockNumber),
+                                    this.oracle.getPrice(chainId, log.address, Math.floor(Date.now() / 1000))
+                                ]);
+
+                                const amountFloat = parseFloat(amountFormatted);
+
+                                // Calculate Display Value (Current)
+                                if (currentPriceData && currentPriceData.price > 0) {
+                                    displayUsdValue = (amountFloat * currentPriceData.price).toFixed(2);
+                                }
+
+                                // Calculate Historic Value (For Totals)
+                                if (historicPriceData && historicPriceData.price > 0) {
+                                    historicUsdValue = amountFloat * historicPriceData.price;
+                                }
+                            } catch (e) {
+                                console.warn(`Failed to fetch price for ${log.address}:`, e);
+                            }
+
+                            // Only add if amount > 0 (optional, but good for cleanup)
+                            if (parseFloat(amountFormatted) > 0) {
+                                items.push({
+                                    direction: isIn ? 'in' : 'out',
+                                    isIn: isIn,
+                                    tokenIcon: isIn ? '📥' : '📤',
+                                    tokenSymbol: symbol,
+                                    tokenAddress: log.address,
+                                    fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
+                                    toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
+                                    amountFormatted: parseFloat(amountFormatted).toFixed(6),
+                                    usdValue: `$${displayUsdValue}`
+                                });
+                                if (isIn) { tokensInCount++; totalIn += historicUsdValue; }
+                                else { tokensOutCount++; totalOut += historicUsdValue; }
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Failed to parse ERC-20 transfer:', e);
+                    }
+                } else if (log.topics.length === 4) {
+                    // ERC721
+                    try {
+                        const parsed = erc721Interface.parseLog(log);
+                        if (!parsed) continue;
+                        const from = parsed.args[0].toLowerCase();
+                        const to = parsed.args[1].toLowerCase();
+                        const tokenId = parsed.args[2].toString();
+
+                        if (from === userAddress || to === userAddress) {
+                            const isIn = to === userAddress;
+                            items.push({
+                                direction: isIn ? 'in' : 'out',
+                                isIn: isIn,
+                                tokenIcon: '🖼️',
+                                tokenSymbol: `NFT #${tokenId}`,
+                                tokenAddress: log.address,
+                                fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
+                                toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
+                                amountFormatted: "1",
+                                usdValue: "$0.00"
+                            });
+                            if (isIn) tokensInCount++; else tokensOutCount++;
+                        }
+                    } catch (e) {
+                        console.log('Failed to parse ERC-721 transfer:', e);
+                    }
+                }
+            }
+            // ERC1155 Check
+            else if (log.topics[0] === erc1155SingleTopic || log.topics[0] === erc1155BatchTopic) {
+                try {
+                    const parsed = erc1155Interface.parseLog(log);
+                    if (!parsed) continue;
+                    const from = parsed.args[1].toLowerCase();
+                    const to = parsed.args[2].toLowerCase();
+
+                    if (from === userAddress || to === userAddress) {
+                        const isIn = to === userAddress;
+                        if (parsed.name === 'TransferSingle') {
+                            const id = parsed.args[3].toString();
+                            const value = parsed.args[4].toString();
+                            items.push({
+                                direction: isIn ? 'in' : 'out',
+                                isIn: isIn,
+                                tokenIcon: '📦',
+                                tokenSymbol: `ID #${id}`,
+                                tokenAddress: log.address,
+                                fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
+                                toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
+                                amountFormatted: value,
+                                usdValue: "$0.00"
+                            });
+                            if (isIn) tokensInCount++; else tokensOutCount++;
+                        } else if (parsed.name === 'TransferBatch') {
+                            const ids = parsed.args[3];
+                            const values = parsed.args[4];
+                            for (let i = 0; i < ids.length; i++) {
+                                items.push({
+                                    direction: isIn ? 'in' : 'out',
+                                    isIn: isIn,
+                                    tokenIcon: '📦',
+                                    tokenSymbol: `ID #${ids[i]}`,
+                                    tokenAddress: log.address,
+                                    fromShort: `${from.slice(0, 6)}...${from.slice(-4)}`,
+                                    toShort: `${to.slice(0, 6)}...${to.slice(-4)}`,
+                                    amountFormatted: values[i].toString(),
+                                    usdValue: "$0.00"
+                                });
+                                if (isIn) tokensInCount++; else tokensOutCount++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log('Failed to parse ERC-1155 transfer:', e);
+                }
+            }
+        }
+        return { items, totalIn, totalOut, tokensInCount, tokensOutCount };
     }
 }

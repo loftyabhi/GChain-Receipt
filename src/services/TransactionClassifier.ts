@@ -8,6 +8,13 @@ import { ethers } from 'ethers';
 
 // ==================== TYPES & INTERFACES ====================
 
+export enum TransactionEnvelopeType {
+    LEGACY = 0,
+    EIP2930 = 1,
+    EIP1559 = 2,
+    EIP4844 = 3,
+}
+
 export enum TransactionType {
     // Token Operations
     TOKEN_TRANSFER = 'token_transfer',
@@ -68,12 +75,18 @@ export enum TransactionType {
     L2_PROVE_WITHDRAWAL = 'l2_prove_withdrawal',
     L2_FINALIZE_WITHDRAWAL = 'l2_finalize_withdrawal',
 
+    // Advanced Execution
+    MULTISIG_EXECUTION = 'multisig_execution',
+    META_TRANSACTION = 'meta_transaction',
+    ACCOUNT_ABSTRACTION = 'account_abstraction',
+
     // Unknown
     UNKNOWN = 'unknown',
 }
 
 export interface ClassificationResult {
     type: TransactionType;
+    envelopeType?: TransactionEnvelopeType;
     subType?: string;
     confidence: number;
     protocol?: string;
@@ -93,6 +106,10 @@ export interface ClassificationDetails {
     isMultiSig?: boolean;
     isProxy?: boolean;
     gasOptimized?: boolean;
+    sender?: string;
+    target?: string;
+    value?: string;
+    data?: string;
 }
 
 // ==================== EVENT SIGNATURES ====================
@@ -173,6 +190,13 @@ const EVENT_SIGNATURES = {
     STAKED: '0x9e71bc8eea02a63969f509818f2dafb9254532904319f9dbda79b67bd34a5f3d',
     UNSTAKED: '0x0f5bb82176feb1b5e747e28471aa92156a04d9f3ab9f45f28e2d704232b93f75',
     REWARDS_CLAIMED: '0x47cee97cb7acd717b3c0aa1435d004cd5b3c8c57d70dbceb4e4458bbd60e39d4',
+
+    // Account Abstraction
+    USER_OPERATION_EVENT: '0x49628fd147100edb3ef1d7634f6e33006d4e28293976af321d22cb2b05c751a3',
+
+    // Multisig (Safe)
+    EXECUTION_SUCCESS: '0x442e715f626346e8c54381002da614f62bee8cf2088c564363b46925e01e4756',
+    SAFE_SETUP: '0x141df868a6331af528e38c83b7aa0329a80ef809609568f4f618a452aeee4ef0',
 };
 
 // ==================== METHOD SIGNATURES ====================
@@ -235,6 +259,13 @@ const METHOD_SIGNATURES = {
     DEPOSIT_TRANSACTION: '0xe9e05c42',
     PROVE_WITHDRAWAL: '0x4870496f',
     FINALIZE_WITHDRAWAL: '0x8c3152e9',
+
+    // Account Abstraction
+    HANDLE_OPS: '0x1fad948c',
+    HANDLE_AGGREGATED_OPS: '0x4b1d7cf5',
+
+    // Multisig (Safe)
+    EXEC_TRANSACTION: '0x6a761202',
 };
 
 // ==================== KNOWN CONTRACTS ====================
@@ -273,6 +304,10 @@ const KNOWN_CONTRACTS = {
     OPTIMISM_PORTAL: '0xbeb5fc579115071764c7423a4f12edde41f106ed',
     ARBITRUM_INBOX: '0x4dbd4fc535ac27206064b68ffcf827b0a60bab3f',
     BASE_PORTAL: '0x49048044d57e1c92a77f79988d21fa8faf74e97e',
+
+    // Account Abstraction
+    ENTRY_POINT_0_6: '0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789',
+    ENTRY_POINT_0_7: '0x0000000071727De22E5E9d8BAf0edAc6f37da032',
 };
 
 // ==================== CLASSIFIER SERVICE ====================
@@ -294,9 +329,14 @@ class TransactionClassifierService {
         // Extract method signature
         const methodSig = inputData.slice(0, 10);
 
+        // Classify Envelope Type
+        const envelopeType = this.classifyEnvelope(transaction);
+
         // 1. Check for contract deployment
         if (!toAddress || toAddress === '0x0000000000000000000000000000000000000000') {
-            return this.classifyContractDeployment(receipt, transaction);
+            const result = this.classifyContractDeployment(receipt, transaction);
+            result.envelopeType = envelopeType;
+            return result;
         }
 
         // 2. Check for L2-specific operations
@@ -308,53 +348,95 @@ class TransactionClassifierService {
                 methodSig,
                 toAddress,
             );
-            if (l2Result) return l2Result;
+            if (l2Result) {
+                l2Result.envelopeType = envelopeType;
+                return l2Result;
+            }
         }
 
         // 3. Check for DEX swaps
         const swapResult = this.classifySwap(logs, methodSig, toAddress);
-        if (swapResult) return swapResult;
+        if (swapResult) {
+            swapResult.envelopeType = envelopeType;
+            return swapResult;
+        }
 
         // 4. Check for NFT operations
         const nftResult = this.classifyNFT(logs, methodSig, toAddress);
-        if (nftResult) return nftResult;
+        if (nftResult) {
+            nftResult.envelopeType = envelopeType;
+            return nftResult;
+        }
 
         // 5. Check for lending/borrowing
         const lendingResult = this.classifyLending(logs, methodSig, toAddress);
-        if (lendingResult) return lendingResult;
+        if (lendingResult) {
+            lendingResult.envelopeType = envelopeType;
+            return lendingResult;
+        }
 
         // 6. Check for staking
         const stakingResult = this.classifyStaking(logs, methodSig, toAddress);
-        if (stakingResult) return stakingResult;
+        if (stakingResult) {
+            stakingResult.envelopeType = envelopeType;
+            return stakingResult;
+        }
 
         // 7. Check for bridge operations
         const bridgeResult = this.classifyBridge(logs, methodSig, toAddress);
-        if (bridgeResult) return bridgeResult;
+        if (bridgeResult) {
+            bridgeResult.envelopeType = envelopeType;
+            return bridgeResult;
+        }
 
         // 8. Check for liquidity operations
         const liquidityResult = this.classifyLiquidity(logs, methodSig);
-        if (liquidityResult) return liquidityResult;
+        if (liquidityResult) {
+            liquidityResult.envelopeType = envelopeType;
+            return liquidityResult;
+        }
 
         // 9. Check for governance
         const govResult = this.classifyGovernance(logs, methodSig);
-        if (govResult) return govResult;
+        if (govResult) {
+            govResult.envelopeType = envelopeType;
+            return govResult;
+        }
 
         // 10. Check for token operations
         const tokenResult = this.classifyTokenOperation(logs, methodSig, value);
-        if (tokenResult) return tokenResult;
+        if (tokenResult) {
+            tokenResult.envelopeType = envelopeType;
+            return tokenResult;
+        }
+
+        // 10.5 Check for Advanced Execution (Multisig / AA)
+        // Checks AFTER specific functional types to prioritize "What happened" over "How it executed"
+        // But if no specific function found, we identify the execution layer.
+        const advancedResult = this.classifyAdvancedExecution(receipt, transaction, logs, methodSig, toAddress);
+        if (advancedResult) {
+            advancedResult.envelopeType = envelopeType;
+            return advancedResult;
+        }
 
         // 11. Native transfer
         if (value !== '0' && logs.length === 0) {
-            return this.classifyNativeTransfer(transaction, receipt);
+            const result = this.classifyNativeTransfer(transaction, receipt);
+            result.envelopeType = envelopeType;
+            return result;
         }
 
         // 12. Bulk transfer detection
         if (logs.filter((l: any) => l.topics[0] === EVENT_SIGNATURES.TRANSFER).length > 3) {
-            return this.classifyBulkTransfer(logs);
+            const result = this.classifyBulkTransfer(logs);
+            result.envelopeType = envelopeType;
+            return result;
         }
 
         // Fallback to contract interaction
-        return this.classifyGenericContractInteraction(receipt, transaction, logs);
+        const result = this.classifyGenericContractInteraction(receipt, transaction, logs);
+        result.envelopeType = envelopeType;
+        return result;
     }
 
     // ==================== CLASSIFICATION METHODS ====================
@@ -860,6 +942,98 @@ class TransactionClassifierService {
         };
     }
 
+    private classifyAdvancedExecution(
+        receipt: any,
+        transaction: any,
+        logs: any[],
+        methodSig: string,
+        toAddress: string
+    ): ClassificationResult | null {
+        // 1. Account Abstraction (ERC-4337)
+        if (
+            toAddress === KNOWN_CONTRACTS.ENTRY_POINT_0_6 ||
+            toAddress === KNOWN_CONTRACTS.ENTRY_POINT_0_7 ||
+            methodSig === METHOD_SIGNATURES.HANDLE_OPS ||
+            methodSig === METHOD_SIGNATURES.HANDLE_AGGREGATED_OPS
+        ) {
+            const userOpEvent = logs.find((l: any) => l.topics[0] === EVENT_SIGNATURES.USER_OPERATION_EVENT);
+            let sender = undefined;
+
+            if (userOpEvent) {
+                console.log('DEBUG: Found UserOperationEvent', userOpEvent.topics);
+            } else {
+                console.log('DEBUG: UserOperationEvent NOT found in logs');
+            }
+
+            if (userOpEvent && userOpEvent.topics.length > 1) {
+                // Determine Sender Index based on EntryPoint version
+                // v0.6: topics = [Sig, Sender, Paymaster] -> Sender is index 1
+                // v0.7: topics = [Sig, UserOpHash, Sender, Paymaster] -> Sender is index 2
+                const senderIndex = userOpEvent.topics.length === 4 ? 2 : 1;
+
+                try {
+                    // Check if index exists
+                    if (userOpEvent.topics[senderIndex]) {
+                        sender = ethers.stripZerosLeft(userOpEvent.topics[senderIndex]);
+                    }
+                } catch (e) {
+                    sender = userOpEvent.topics[senderIndex];
+                }
+            }
+
+            return {
+                type: TransactionType.ACCOUNT_ABSTRACTION,
+                confidence: 0.95,
+                details: {
+                    method: methodSig,
+                    eventSignatures: userOpEvent ? [EVENT_SIGNATURES.USER_OPERATION_EVENT] : [],
+                    isProxy: true,
+                    sender: sender
+                },
+                matches: ['ERC-4337 UserOperation detected'],
+                warnings: []
+            };
+        }
+
+        // 2. Multisig (Gnosis Safe)
+        const isSafeExec = methodSig === METHOD_SIGNATURES.EXEC_TRANSACTION;
+        const safeSuccess = logs.some((l: any) => l.topics[0] === EVENT_SIGNATURES.EXECUTION_SUCCESS);
+
+        if (isSafeExec || safeSuccess) {
+            return {
+                type: TransactionType.MULTISIG_EXECUTION,
+                confidence: 0.95,
+                details: {
+                    method: methodSig,
+                    isMultiSig: true,
+                    eventSignatures: safeSuccess ? [EVENT_SIGNATURES.EXECUTION_SUCCESS] : []
+                },
+                matches: ['Multisig execution detected'],
+                warnings: []
+            };
+        }
+
+        return null;
+    }
+
+    private classifyEnvelope(transaction: any): TransactionEnvelopeType {
+        // Handle Ethers v6 vs v5 vs RPC response structures
+        // RPC often returns type as hex string '0x2' or number 2
+
+        let typeVal = transaction.type;
+
+        if (typeof typeVal === 'string') {
+            typeVal = parseInt(typeVal, 16);
+        }
+
+        if (typeVal === 0 || typeVal === undefined || typeVal === null) return TransactionEnvelopeType.LEGACY;
+        if (typeVal === 1) return TransactionEnvelopeType.EIP2930;
+        if (typeVal === 2) return TransactionEnvelopeType.EIP1559;
+        if (typeVal === 3) return TransactionEnvelopeType.EIP4844;
+
+        return TransactionEnvelopeType.LEGACY;
+    }
+
     // ==================== HELPER METHODS ====================
 
     private isL2Chain(chainId: number): boolean {
@@ -909,6 +1083,9 @@ class TransactionClassifierService {
             [TransactionType.L2_WITHDRAWAL]: 'L2 Withdrawal',
             [TransactionType.L2_PROVE_WITHDRAWAL]: 'Prove L2 Withdrawal',
             [TransactionType.L2_FINALIZE_WITHDRAWAL]: 'Finalize L2 Withdrawal',
+            [TransactionType.MULTISIG_EXECUTION]: 'Multisig Transaction',
+            [TransactionType.ACCOUNT_ABSTRACTION]: 'Account Abstraction',
+            [TransactionType.META_TRANSACTION]: 'Meta-Transaction',
             [TransactionType.UNKNOWN]: 'Unknown Transaction',
         };
 
@@ -957,6 +1134,9 @@ class TransactionClassifierService {
             [TransactionType.L2_WITHDRAWAL]: '⬆️',
             [TransactionType.L2_PROVE_WITHDRAWAL]: '🔍',
             [TransactionType.L2_FINALIZE_WITHDRAWAL]: '✔️',
+            [TransactionType.MULTISIG_EXECUTION]: '🔐',
+            [TransactionType.ACCOUNT_ABSTRACTION]: '🛡️',
+            [TransactionType.META_TRANSACTION]: '🎭',
             [TransactionType.UNKNOWN]: '❓',
         };
 

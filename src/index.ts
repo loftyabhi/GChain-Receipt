@@ -34,7 +34,8 @@ import './queue/BillWorker'; // Start Worker
 
 app.post('/api/v1/bills/resolve', async (req, res) => {
     try {
-        const { txHash, chainId } = req.body;
+
+        const { txHash, chainId, connectedWallet } = req.body;
         if (!txHash || !chainId) {
             res.status(400).json({ error: 'Missing txHash or chainId' });
             return;
@@ -42,7 +43,11 @@ app.post('/api/v1/bills/resolve', async (req, res) => {
 
         console.log(`Received request: ${txHash} -> Adding to Queue`);
 
-        const job = await addBillJob({ txHash, chainId: Number(chainId) });
+        const job = await addBillJob({
+            txHash,
+            chainId: Number(chainId),
+            connectedWallet // Pass optional connected wallet
+        });
 
         res.json({
             success: true,

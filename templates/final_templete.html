@@ -281,6 +281,18 @@
             border: 1px solid var(--primary-purple-light);
         }
 
+        .badge-technical {
+            background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+            color: #0369a1;
+            border: 1px solid #7dd3fc;
+        }
+
+        .badge-security {
+            background: linear-gradient(135deg, #ecfccb 0%, #d9f99d 100%);
+            color: #3f6212;
+            border: 1px solid #bef264;
+        }
+
         /* ==================== ALERT BANNER ==================== */
         .alert-banner {
             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
@@ -867,20 +879,29 @@
         }
 
         .confidence-meter {
-            margin-top: var(--space-md);
-            padding: var(--space-md);
+            /* Align with audit-item */
             background: white;
+            padding: var(--space-md);
             border-radius: var(--radius-md);
             border: 1px solid var(--gray-200);
+            height: 100%;
+            /* Fill height */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
         .confidence-label {
-            font-size: 10px;
+            /* Match info-label */
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9px;
             color: var(--gray-600);
-            margin-bottom: var(--space-sm);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             font-weight: 600;
+            margin-bottom: 6px;
         }
 
         .confidence-bar-wrapper {
@@ -1223,14 +1244,32 @@
                 <h1 class="bill-title">Transaction Receipt</h1>
                 <div class="bill-date">Generated: {{GENERATED_AT}}</div>
                 <div class="badges">
-                    <span class="badge badge-{{STATUS}}">
-                        <span class="badge-icon">{{#if STATUS_CONFIRMED}}✓{{else}}⏱{{/if}}</span>
-                        {{STATUS}}
+                    <span class="badge {{#if STATUS_CONFIRMED}}badge-confirmed{{else}}badge-failed{{/if}}">
+                        <span class="badge-icon">{{#if STATUS_CONFIRMED}}✔{{else}}✖{{/if}}</span>
+                        {{#if STATUS_CONFIRMED}}Confirmed{{else}}Failed{{/if}}
                     </span>
                     <span class="badge badge-type">
-                        <span class="badge-icon">📋</span>
-                        {{TYPE}}
+                        <span class="badge-icon">{{TYPE_ICON}}</span>
+                        {{TYPE_READABLE}}
                     </span>
+                    {{#if IS_MULTISIG}}
+                    <span class="badge badge-security">
+                        <span class="badge-icon">🔐</span>
+                        Multisig
+                    </span>
+                    {{/if}}
+                    {{#if IS_SMART_ACCOUNT}}
+                    <span class="badge badge-security">
+                        <span class="badge-icon">🛡️</span>
+                        Smart Account
+                    </span>
+                    {{/if}}
+                    {{#if ENVELOPE_LABEL}}
+                    <span class="badge badge-technical">
+                        <span class="badge-icon">✉️</span>
+                        {{ENVELOPE_LABEL}}
+                    </span>
+                    {{/if}}
                 </div>
             </div>
         </header>
@@ -1439,7 +1478,7 @@
         <!-- ==================== FINANCIAL SUMMARY ==================== -->
         <div class="totals-feature">
             <div class="totals-header">
-                <h2 class="totals-title">📈 Financial Summary</h2>
+                <h2 class="totals-title">📈 Historic Value</h2>
             </div>
 
             <div class="totals-grid">
@@ -1457,25 +1496,10 @@
                     <div class="total-subvalue">{{TOKENS_OUT_COUNT}} tokens</div>
                 </div>
 
-                <div class="total-item">
-                    <div class="total-icon">⛽</div>
-                    <div class="total-label">Gas Fees</div>
-                    <div class="total-value">${{TOTAL_FEE_USD}}</div>
-                    <div class="total-subvalue">{{TOTAL_FEE_ETH}} {{CHAIN_SYMBOL}}</div>
-                </div>
+
             </div>
 
-            <div class="net-change-section">
-                <div class="net-change-label">Net Portfolio Change</div>
-                <div class="net-change-value">{{NET_CHANGE_SIGN}}${{NET_CHANGE_USD}}</div>
-                <div class="net-change-description">
-                    {{#if NET_CHANGE_POSITIVE}}
-                    Your portfolio increased by this amount
-                    {{else}}
-                    Your portfolio decreased by this amount
-                    {{/if}}
-                </div>
-            </div>
+
         </div>
 
         <!-- ==================== AUDIT & VERIFICATION ==================== -->
@@ -1518,7 +1542,7 @@
             <div class="confidence-meter">
                 <div class="confidence-label">Classification Confidence Score</div>
                 <div class="confidence-bar-wrapper">
-                    <div class="confidence-bar-fill" style="width: {{CONFIDENCE_PERCENT}}%"></div>
+                    <div class="confidence-bar-fill" data-width="{{CONFIDENCE_PERCENT}}%"></div>
                 </div>
                 <div class="confidence-value">{{CONFIDENCE}}% Confident</div>
             </div>
@@ -1620,6 +1644,12 @@
             </footer>
         </div>
     </div>
+    <script>
+        // Apply dynamic widths that might cause CSS validation errors if inline
+        document.querySelectorAll('[data-width]').forEach(el => {
+            el.style.width = el.getAttribute('data-width');
+        });
+    </script>
 </body>
 
 </html>
