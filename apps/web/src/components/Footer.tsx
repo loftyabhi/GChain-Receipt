@@ -82,7 +82,7 @@ export function Footer() {
                             <span className="text-xl font-bold tracking-tight text-white">Chain Receipt</span>
                         </Link>
                         <p className="text-sm text-gray-400 leading-relaxed">
-                            Professional blockchain transaction receipts for modern needs. Audit-ready, verifiable, and beautiful.
+                            Professional Blockchain Intelligence. Audit-grade documentation for the decentralized economy.
                         </p>
                     </div>
 
@@ -95,7 +95,7 @@ export function Footer() {
                                 </Link>
                             </li>
                             <li>
-                                <Link href="/#features" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                <Link href="/features" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
                                     Features
                                 </Link>
                             </li>
@@ -120,6 +120,11 @@ export function Footer() {
                             <li>
                                 <Link href="/terms-of-service" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
                                     Terms of Service
+                                </Link>
+                            </li>
+                            <li>
+                                <Link href="/disclaimer" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                    Disclaimer
                                 </Link>
                             </li>
                         </ul>

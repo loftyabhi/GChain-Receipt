@@ -7,6 +7,9 @@ Chain Receipt is a full-stack application designed to generate detailed financia
 ## 🌟 Key Features
 
 -   **Automated Receipt Generation**: Converts transaction hashes into downloadable PDF receipts.
+-   **Show Your Support**: A decentralized contribution system on Base Sepolia allowing users to support the project via native ETH or ERC20 tokens.
+-   **Admin Dashboard**: comprehensive control center to manage minimum contributions, allow/ban tokens, and withdraw funds securely.
+-   **Zero-Knowledge Privacy**: Client-side processing architecture ensuring user data and private keys never leave the browser.
 -   **Enterprise Security**: Strict physical separation of frontend and backend runtimes.
 -   **Internal Transactions**: Detailed tracking of smart contract executions.
 -   **Historical Pricing**: Accurate point-in-time valuation.
@@ -30,6 +33,13 @@ This project uses a Workspace-based Monorepo structure:
 │
 └── tools/                  # Deployment & Verification Scripts
 ```
+
+### 🧠 Support System & Persistence
+The "Show Your Support" feature uses a **Lightweight Persistent Indexing** strategy:
+-   **Contributor Data**: Stored in a JSON database (`apps/web/src/data/contributors.json`) to allow incremental updates without a heavy SQL requirement.
+-   **RPC Optimization**: Fetches logs using "Smart Ranges" (only the latest blocks) to respect Free Tier limits of Alchemy/Infura.
+-   **Fallback**: Automatically degrades to public RPCs if private keys are missing.
+
 
 ## 🚀 Quick Start
 

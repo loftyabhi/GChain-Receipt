@@ -6,7 +6,7 @@ import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { mainnet, base, sepolia, baseSepolia } from '@reown/appkit/networks';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider, type Config, http } from 'wagmi';
-import { ToastProvider } from './toast';
+import { Toaster } from 'sonner';
 
 // 1. Get projectId
 const projectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
@@ -52,9 +52,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return (
         <WagmiProvider config={wagmiAdapter.wagmiConfig as Config}>
             <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    {children}
-                </ToastProvider>
+                {children}
+                <Toaster richColors position="bottom-right" theme="dark" />
             </QueryClientProvider>
         </WagmiProvider>
     );

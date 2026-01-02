@@ -16,6 +16,11 @@ The frontend is a Next.js application located in `apps/web`.
     ```ini
     NEXT_PUBLIC_API_URL=https://your-api.onrender.com
     NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=...
+    
+    # Show Your Support System
+    NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS=0x...
+    NEXT_PUBLIC_ADMIN_ADDRESS=0x...
+    NEXT_PUBLIC_ALCHEMY_API_KEY=...  # Optional: For high-performance indexing
     ```
 
 ## 2. Backend (Render / Railway)
