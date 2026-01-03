@@ -15,17 +15,24 @@ const SUPPORT_VAULT_ABI = [
 
 export class IndexerService {
     private provider: ethers.JsonRpcProvider;
-    private contract: ethers.Contract;
+    private contract: ethers.Contract | null = null;
     private isRunning = false;
 
     constructor() {
         const rpcUrl = process.env.BASE_RPC_URL || "https://sepolia.base.org";
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
-        this.contract = new ethers.Contract(VAULT_ADDRESS, SUPPORT_VAULT_ABI, this.provider);
     }
 
     public async start() {
         if (this.isRunning) return;
+
+        // [SAFETY] Validate Address before starting
+        if (!VAULT_ADDRESS || !ethers.isAddress(VAULT_ADDRESS)) {
+            console.warn(`[Indexer] SKIPPING: Invalid or missing VAULT_ADDRESS (${VAULT_ADDRESS}). Check env vars.`);
+            return;
+        }
+
+        this.contract = new ethers.Contract(VAULT_ADDRESS, SUPPORT_VAULT_ABI, this.provider);
         this.isRunning = true;
         console.log(`[Indexer] Starting Support Vault Indexer for Chain ${CHAIN_ID}...`);
         this.loop();
@@ -75,6 +82,7 @@ export class IndexerService {
         console.log(`[Indexer] Syncing ${currentBlock} -> ${toBlock} (${Math.round((currentBlock / latestBlock) * 100)}%)`);
 
         // 2. Fetch Logs
+        if (!this.contract) return; // Safety
         const filter = this.contract.filters.Contributed();
         const events = await this.contract.queryFilter(filter, currentBlock, toBlock);
 

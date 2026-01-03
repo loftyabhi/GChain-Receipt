@@ -29,8 +29,10 @@ export default function SupportClient() {
     // Removed useAppKit
     const [contributionAmount, setContributionAmount] = useState('');
     const [topContributors, setTopContributors] = useState<any[]>([]);
+    const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
+        setMounted(true);
         fetch('/api/contributors?type=top')
             .then(res => res.json())
             .then(data => {
@@ -200,7 +202,7 @@ export default function SupportClient() {
                                 disabled={isPending}
                                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-6 py-4 font-bold text-white transition-all hover:bg-violet-500 hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-violet-600/20 disabled:opacity-70 disabled:cursor-not-allowed"
                             >
-                                {isPending ? <Loader2 className="animate-spin" /> : (isConnected ? 'Confirm Contribution' : 'Connect Wallet to Support')}
+                                {isPending ? <Loader2 className="animate-spin" /> : (mounted && isConnected ? 'Confirm Contribution' : 'Connect Wallet to Support')}
                                 {!isPending && <ArrowRight size={18} />}
                             </button>
                             <p className="text-center text-xs text-zinc-500">
