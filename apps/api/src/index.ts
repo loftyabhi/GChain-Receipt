@@ -150,41 +150,58 @@ const verifyAdmin = (req: Request, res: Response, next: NextFunction) => {
 };
 
 // Plans (Public)
-app.get('/api/v1/plans', (req: Request, res: Response) => {
-    res.json(adminService.getPlans());
+// Plans (Public)
+app.get('/api/v1/plans', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        res.json(await adminService.getPlans());
+    } catch (e) { next(e); }
 });
 
-app.post('/api/v1/admin/plans', verifyAdmin, (req: Request, res: Response) => {
-    res.json(adminService.savePlan(req.body));
+app.post('/api/v1/admin/plans', verifyAdmin, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        res.json(await adminService.savePlan(req.body));
+    } catch (e) { next(e); }
 });
 
-app.get('/api/v1/admin/plans', verifyAdmin, (req: Request, res: Response) => {
-    res.json(adminService.getPlans());
+app.get('/api/v1/admin/plans', verifyAdmin, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        res.json(await adminService.getPlans());
+    } catch (e) { next(e); }
 });
 
-app.delete('/api/v1/admin/plans/:id', verifyAdmin, (req: Request, res: Response) => {
-    adminService.deletePlan(req.params.id);
-    res.json({ success: true });
+app.delete('/api/v1/admin/plans/:id', verifyAdmin, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        await adminService.deletePlan(req.params.id);
+        res.json({ success: true });
+    } catch (e) { next(e); }
 });
 
 // Ads
 // Public Random Ad
-app.get('/api/v1/ads/random', (req: Request, res: Response) => {
-    const placement = (req.query.placement as 'web' | 'pdf') || 'web';
-    res.json(adminService.getRandomAd(placement));
+app.get('/api/v1/ads/random', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const placement = (req.query.placement as 'web' | 'pdf') || 'web';
+        res.json(await adminService.getRandomAd(placement));
+    } catch (e) { next(e); }
 });
 
-app.get('/api/v1/admin/ads', (req: Request, res: Response) => {
-    res.json(adminService.getAds());
+app.get('/api/v1/admin/ads', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        res.json(await adminService.getAds());
+    } catch (e) { next(e); }
 });
 
-app.post('/api/v1/admin/ads', verifyAdmin, (req: Request, res: Response) => {
-    res.json(adminService.saveAd(req.body));
+app.post('/api/v1/admin/ads', verifyAdmin, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        res.json(await adminService.saveAd(req.body));
+    } catch (e) { next(e); }
 });
 
-app.delete('/api/v1/admin/ads/:id', verifyAdmin, (req: Request, res: Response) => {
-    adminService.deleteAd(req.params.id);
-    res.json({ success: true });
+app.delete('/api/v1/admin/ads/:id', verifyAdmin, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        await adminService.deleteAd(req.params.id);
+        res.json({ success: true });
+    } catch (e) { next(e); }
 });
 
 // --- Centralized Error Handler ---

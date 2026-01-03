@@ -117,6 +117,9 @@ export interface BillViewModel {
     CLASSIFICATION_METHOD: string;
     REORG_DETECTED: boolean;
     CONFIDENCE: number;
+    CURRENT_YEAR: number;
+    FRONTEND_URL: string;
+    DISCLAIMER_URL: string;
 
     // Ads
     hasAd: boolean;
@@ -694,7 +697,7 @@ export class BillService {
 
         const netChange = totalIn - (totalOut + feeData.feeUsdNum);
 
-        const randomAd = this.adminService.getRandomAd('pdf');
+        const randomAd = await this.adminService.getRandomAd('pdf');
         const qrCodeDataUrl = await QRCode.toDataURL(this.getExplorerUrl(chainId, tx.hash));
 
         return {
@@ -753,7 +756,10 @@ export class BillService {
             PRICE_SOURCE: 'Combined Oracle (Hist+Curr)',
             CLASSIFICATION_METHOD: 'Determinisitic Rule Engine',
             REORG_DETECTED: false,
-            CONFIDENCE: Math.round(classification.confidence.score * 100)
+            CONFIDENCE: Math.round(classification.confidence.score * 100),
+            CURRENT_YEAR: new Date().getFullYear(),
+            FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
+            DISCLAIMER_URL: process.env.DISCLAIMER_URL || 'http://localhost:3000/disclaimer'
         };
     }
 
