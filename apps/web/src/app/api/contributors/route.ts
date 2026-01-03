@@ -4,6 +4,9 @@ import { base, baseSepolia } from 'viem/chains';
 import { createClient } from '@supabase/supabase-js';
 
 // --- Configuration ---
+export const dynamic = 'force-dynamic'; // Defaults to auto, but we want to ensure no caching for live leaderboard
+export const revalidate = 0;
+
 // Ensure these are set in your .env.local
 const VAULT_ADDRESS = process.env.NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS as `0x${string}`;
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;

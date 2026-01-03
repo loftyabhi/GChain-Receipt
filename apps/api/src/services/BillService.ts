@@ -190,6 +190,62 @@ export class BillService {
     }
 
     /**
+     * Regenerate a bill from its ID string (Self-Healing).
+     * ID Format: BILL-{chainId}-{blockNumber}-{shortHash}
+     */
+    async regenerateFromId(billId: string): Promise<string> {
+        console.log(`[BillService] Attempting regeneration for ID: ${billId}`);
+        const cleanId = billId.replace('.pdf', '').replace('.json', '');
+        const parts = cleanId.split('-');
+
+        if (parts.length < 4 || parts[0] !== 'BILL') {
+            throw new Error('Invalid Bill ID format for regeneration');
+        }
+
+        const chainId = parseInt(parts[1]);
+        const blockNumber = parseInt(parts[2]);
+        const shortHash = parts[3]; // "0x" + 4 chars defined in generateBill
+
+        if (isNaN(chainId) || isNaN(blockNumber) || !shortHash) {
+            throw new Error('Invalid params extracted from Bill ID');
+        }
+
+        // 1. Fetch Block to find full Tx Hash
+        const provider = new ethers.JsonRpcProvider(this.getRpcUrl(chainId));
+        const block = await provider.getBlock(blockNumber);
+
+        if (!block) throw new Error('Block not found on chain');
+
+        // 2. Find Transaction
+        // block.transactions is list of hashes (strings)
+        let foundHash: string | null = null;
+        for (const tx of block.transactions) {
+            const h = typeof tx === 'string' ? tx : (tx as any).hash;
+            if (h.toLowerCase().startsWith(shortHash.toLowerCase())) {
+                foundHash = h;
+                break;
+            }
+        }
+
+        if (!foundHash) {
+            throw new Error(`Transaction with prefix ${shortHash} not found in block ${blockNumber}`);
+        }
+
+        console.log(`[BillService] Recovered hash ${foundHash} for ${cleanId}`);
+
+        // 3. Trigger Generation (which will update DB and Storage)
+        await this.generateBill({
+            txHash: foundHash,
+            chainId: chainId,
+            // We don't have connected wallet here, so it will be "Unclaimed" in DB for now
+            // or resolve from 'from' address.
+        });
+
+        // 4. Return Public Path
+        return `/bills/${cleanId}.pdf`;
+    }
+
+    /**
      * Main Entry Point: Generate a PDF Bill for a transaction.
      */
     async generateBill(request: BillRequest): Promise<BillResponse> {
@@ -787,7 +843,7 @@ export class BillService {
                 .header { margin-top: 0 !important; } 
             `;
 
-            await page1.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+            await page1.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 });
             await page1.addStyleTag({ content: resetPaddingCss });
 
             const p1Buffer = await page1.pdf({
@@ -800,7 +856,7 @@ export class BillService {
             await page1.close();
 
             const page2 = await browser.newPage();
-            await page2.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+            await page2.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 });
             await page2.addStyleTag({ content: resetPaddingCss });
 
             const p2Buffer = await page2.pdf({

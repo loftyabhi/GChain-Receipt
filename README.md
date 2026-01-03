@@ -6,8 +6,10 @@ Chain Receipt is a full-stack application designed to generate detailed financia
 
 ## 🌟 Key Features
 
--   **Automated Receipt Generation**: Converts transaction hashes into downloadable PDF receipts.
--   **Show Your Support**: A decentralized contribution system on Base Sepolia allowing users to support the project via native ETH or ERC20 tokens.
+-   **Automated Receipt Generation**: Converts- **Transaction Classification**: Enterprise-grade classifier for Tx Types.
+- **Support System**: Accept donations via `SupportVault.sol` with **Anonymous** contribution support.
+- **Event-Driven Indexer**: Hybrid indexing with 24h passive mode + instant trigger on contribution.
+- **Blockscout Integration**: Fetch internal transactions for accurate financial records. ERC20 tokens.
 -   **Admin Dashboard**: comprehensive control center to manage minimum contributions, allow/ban tokens, and withdraw funds securely.
 -   **Zero-Knowledge Privacy**: Client-side processing architecture ensuring user data and private keys never leave the browser.
 -   **Enterprise Security**: Strict physical separation of frontend and backend runtimes.
@@ -35,10 +37,10 @@ This project uses a Workspace-based Monorepo structure:
 ```
 
 ### 🧠 Support System & Persistence
-The "Show Your Support" feature uses a **Lightweight Persistent Indexing** strategy:
--   **Contributor Data**: Stored in a JSON database (`apps/web/src/data/contributors.json`) to allow incremental updates without a heavy SQL requirement.
--   **RPC Optimization**: Fetches logs using "Smart Ranges" (only the latest blocks) to respect Free Tier limits of Alchemy/Infura.
--   **Fallback**: Automatically degrades to public RPCs if private keys are missing.
+The "Show Your Support" feature uses a **Hybrid Indexing** strategy:
+-   **Atomic Ingestion**: An `IndexerService` polls the smart contract and uses a custom RPC function to atomically ingest events into PostgreSQL.
+-   **Automated Aggregation**: Database triggers automatically maintain a real-time leaderboard in the `contributors` table, ensuring O(1) read performance.
+-   **Privacy**: Respects the on-chain `isAnonymous` flag for all display logic.
 
 
 ## 🚀 Quick Start
@@ -83,6 +85,7 @@ npm run dev -w apps/api
 
 -   [Deployment Guide](DEPLOYMENT.md): Instructions for Vercel and Render.
 -   [Contributing](CONTRIBUTING.md): Guidelines for developing in the monorepo.
+-   [Contribution System Architecture](docs/CONTRIBUTION_SYSTEM.md): Deep dive into the supporter leaderboard logic.
 -   [Security Audit](security_audit.md): Details on the security architecture.
 
 ## 📄 License

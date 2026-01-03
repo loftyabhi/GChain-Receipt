@@ -5,8 +5,8 @@ import { supabase } from '../lib/supabase';
 const VAULT_ADDRESS = process.env.NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS || "0xYourVaultAddress"; // TODO: Ensure ENV is passed to API
 // Base Mainnet Deployment Block (or Sepolia) - defaulting to 0 or env
 const START_BLOCK = process.env.INDEXER_START_BLOCK ? parseInt(process.env.INDEXER_START_BLOCK) : 19548324;
-const CHUNK_SIZE = 10;
-const POLLING_INTERVAL_MS = 10000; // 10s
+const CHUNK_SIZE = 10; // Strict limit for free tier (inclusive range)
+const POLLING_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 Hours
 const CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID ? parseInt(process.env.NEXT_PUBLIC_CHAIN_ID) : 84532; // Default Base Sepolia
 
 const SUPPORT_VAULT_ABI = [
@@ -17,6 +17,9 @@ export class IndexerService {
     private provider: ethers.JsonRpcProvider;
     private contract: ethers.Contract | null = null;
     private isRunning = false;
+    private cachedLatestBlock: number = 0;
+    private lastBlockFetchTime: number = 0;
+    private triggerResolver: ((value: unknown) => void) | null = null;
 
     constructor() {
         const rpcUrl = process.env.BASE_RPC_URL || "https://sepolia.base.org";
@@ -38,15 +41,38 @@ export class IndexerService {
         this.loop();
     }
 
+    public triggerSync() {
+        if (this.triggerResolver) {
+            console.log('[Indexer] Manual Trigger Received. Waking up...');
+            this.triggerResolver(true);
+            this.triggerResolver = null;
+        }
+    }
+
     private async loop() {
         while (this.isRunning) {
             try {
                 await this.syncStep();
             } catch (error) {
                 console.error('[Indexer] Sync Error:', error);
-                await new Promise(r => setTimeout(r, 5000)); // Backoff
+
+                // Error Backoff
+                if (this.cachedLatestBlock > 0 && this.cachedLatestBlock - 1000 > 0) {
+                    await new Promise(r => setTimeout(r, 100));
+                } else {
+                    await new Promise(r => setTimeout(r, 5000));
+                }
             }
         }
+    }
+
+    private async waitForNextTick() {
+        console.log(`[Indexer] Sleeping for ${POLLING_INTERVAL_MS / 1000 / 60 / 60} hours...`);
+        // Race between timeout and manual trigger
+        await new Promise(resolve => {
+            this.triggerResolver = resolve;
+            setTimeout(resolve, POLLING_INTERVAL_MS);
+        });
     }
 
     private async syncStep() {
@@ -67,16 +93,29 @@ export class IndexerService {
             console.log(`[Indexer] No cursor found. Starting from ${START_BLOCK}`);
         }
 
-        const latestBlock = await this.provider.getBlockNumber();
+        // Optimize: Update latest block only every 10s or if undefined
+        const now = Date.now();
+        if (now - this.lastBlockFetchTime > 10000 || this.cachedLatestBlock === 0) {
+            try {
+                this.cachedLatestBlock = await this.provider.getBlockNumber();
+                this.lastBlockFetchTime = now;
+            } catch (err) {
+                console.error("[Indexer] Failed to fetch latest block, using cached:", this.cachedLatestBlock);
+            }
+        }
+
+        const latestBlock = this.cachedLatestBlock;
 
         if (currentBlock >= latestBlock) {
             // Caught up
-            await new Promise(r => setTimeout(r, POLLING_INTERVAL_MS));
+            await this.waitForNextTick();
             return;
         }
 
-        // [CRITICAL] Clamp range
-        let toBlock = currentBlock + CHUNK_SIZE;
+        // [CRITICAL] Clamp range. 
+        // Max range is 10 blocks INCLUSIVE. So [start, start + 9].
+        // Example: Start 100. End = 100 + 10 - 1 = 109. Blocks: 100..109 (10 blocks)
+        let toBlock = currentBlock + CHUNK_SIZE - 1;
         if (toBlock > latestBlock) toBlock = latestBlock;
 
         console.log(`[Indexer] Syncing ${currentBlock} -> ${toBlock} (${Math.round((currentBlock / latestBlock) * 100)}%)`);

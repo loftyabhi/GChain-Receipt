@@ -5,6 +5,7 @@ import path from 'path';
 import { z } from 'zod';
 import { AuthService } from './services/AuthService';
 import { AdminService } from './services/AdminService';
+import { BillService } from './services/BillService';
 import { addBillJob, billQueue } from './queue/BillQueue';
 import './queue/BillWorker'; // Start Worker
 
@@ -23,10 +24,35 @@ import { IndexerService } from './services/IndexerService';
 const indexer = new IndexerService();
 indexer.start().catch(err => console.error('[Main] Indexer Start Failed', err));
 
+// Services
+const authService = new AuthService();
+const adminService = new AdminService();
+const billService = new BillService();
+
 // Serve generated PDFs via Supabase Redirect
 app.get('/bills/:fileName', async (req: Request, res: Response) => {
     const { fileName } = req.params;
     try {
+        // 1. Check if file exists in Storage
+        const { data: files } = await supabase.storage.from('receipts').list('', {
+            search: fileName,
+            limit: 1
+        });
+
+        // 2. If missing, attempt regeneration (Self-Healing)
+        if (!files || files.length === 0) {
+            console.log(`[API] File ${fileName} missing. Triggering self-healing...`);
+            try {
+                await billService.regenerateFromId(fileName);
+                console.log(`[API] Self-healing successful for ${fileName}`);
+            } catch (regenError: any) {
+                console.error(`[API] Self-healing failed: ${regenError.message}`);
+                // If regeneration fails (e.g. invalid ID or tx not found), return 404
+                return res.status(404).send('Receipt not found and could not be regenerated.');
+            }
+        }
+
+        // 3. Serve URL (Guaranteed to exist now)
         const { data } = supabase.storage.from('receipts').getPublicUrl(fileName);
         if (data?.publicUrl) {
             res.redirect(307, data.publicUrl);
@@ -34,13 +60,14 @@ app.get('/bills/:fileName', async (req: Request, res: Response) => {
             res.status(404).send('Receipt not found');
         }
     } catch (error) {
+        console.error(error);
         res.status(500).send('Error resolving receipt URL');
     }
 });
 
-// Services
-const authService = new AuthService();
-const adminService = new AdminService();
+// Services - Initialized above
+// const authService = new AuthService();
+// const adminService = new AdminService();
 
 // --- Schemas ---
 
@@ -113,6 +140,12 @@ app.get('/api/v1/bills/job/:id', async (req: Request, res: Response, next: NextF
     } catch (error) {
         next(error);
     }
+});
+
+// 2.2 Trigger Indexer (Public but rate-limited by nature of cost)
+app.post('/api/v1/indexer/trigger', (req: Request, res: Response) => {
+    indexer.triggerSync();
+    res.json({ success: true, message: 'Indexer trigger signal sent' });
 });
 
 // 3. Admin Login

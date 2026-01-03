@@ -4,6 +4,7 @@ import { Navbar } from '@/components/Navbar';
 import { motion } from 'framer-motion';
 import { Wallet, Shield, Zap, Globe, Heart, ArrowRight, User, Loader2 } from 'lucide-react';
 import { useAccount, useWriteContract, useSwitchChain, useChainId } from 'wagmi';
+import { RefreshCw } from 'lucide-react'; // Import Refresh Icon
 import { parseEther } from 'viem';
 // Removed AppKit imports
 import { baseSepolia } from 'wagmi/chains';
@@ -28,12 +29,13 @@ export default function SupportClient() {
     const { address, isConnected } = useAccount();
     // Removed useAppKit
     const [contributionAmount, setContributionAmount] = useState('');
+    const [isAnonymous, setIsAnonymous] = useState(false);
     const [topContributors, setTopContributors] = useState<any[]>([]);
     const [mounted, setMounted] = useState(false);
 
-    useEffect(() => {
-        setMounted(true);
-        fetch('/api/contributors?type=top')
+    // --- Data Fetching with Polling ---
+    const fetchContributors = () => {
+        fetch(`/api/contributors?type=top&ts=${Date.now()}`) // Bust cache
             .then(res => res.json())
             .then(data => {
                 if (data.contributors) {
@@ -41,6 +43,15 @@ export default function SupportClient() {
                 }
             })
             .catch(err => console.error('Failed to fetch contributors:', err));
+    };
+
+    useEffect(() => {
+        setMounted(true);
+        fetchContributors();
+
+        // POLL: Update every 60 seconds (or requested "once in a day", but 60s is better for UX)
+        const interval = setInterval(fetchContributors, 60000);
+        return () => clearInterval(interval);
     }, []);
 
     const [isPending, setIsPending] = useState(false);
@@ -97,7 +108,7 @@ export default function SupportClient() {
                 address: VAULT_ADDRESS,
                 abi: VAULT_ABI,
                 functionName: 'contributeNative',
-                args: [false], // Anonymous flag
+                args: [isAnonymous], // Use state
                 value: parseEther(contributionAmount),
             });
 
@@ -106,6 +117,19 @@ export default function SupportClient() {
                 description: `Tx Hash: ${hash.slice(0, 10)}...`
             });
             setContributionAmount('');
+
+            // [Event-Driven] Trigger Backend Indexer Immediately
+            try {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+                await fetch(`${apiUrl}/api/v1/indexer/trigger`, { method: 'POST' });
+                toast.info("Indexing triggered...");
+            } catch (ignored) { console.error("Trigger failed", ignored); }
+
+            // [Auto-Refresh] Wait for Indexer to process (5s is enough now due to trigger) then refresh list
+            setTimeout(() => {
+                fetchContributors();
+                toast.success("Leaderboard Updated!");
+            }, 5000); // Faster feedback now
         } catch (err: any) {
             console.error('Contribution failed:', err);
             let errorMsg = err.message || "Transaction failed";
@@ -197,6 +221,17 @@ export default function SupportClient() {
                                 </div>
                             </div>
 
+                            {/* Anonymous Toggle */}
+                            <div className="flex items-center gap-3 bg-black/20 p-4 rounded-xl border border-white/5 cursor-pointer hover:bg-black/30 transition-colors" onClick={() => setIsAnonymous(!isAnonymous)}>
+                                <div className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${isAnonymous ? 'bg-violet-600 border-violet-600' : 'bg-transparent border-zinc-600'}`}>
+                                    {isAnonymous && <User size={14} className="text-white" />}
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-bold text-white">Contribute Anonymously</span>
+                                    <span className="text-xs text-zinc-500">Your address will be hidden from the public leaderboard.</span>
+                                </div>
+                            </div>
+
                             <button
                                 onClick={handleContribute}
                                 disabled={isPending}
@@ -214,7 +249,16 @@ export default function SupportClient() {
                     {/* C. Top Contributors */}
                     <div className="mb-24">
                         <div className="text-center mb-12">
-                            <h2 className="text-3xl font-bold text-white mb-3">Top Contributors</h2>
+                            <div className="flex items-center justify-center gap-2">
+                                <h2 className="text-3xl font-bold text-white mb-3">Top Contributors</h2>
+                                <button
+                                    onClick={fetchContributors}
+                                    className="p-2 rounded-full hover:bg-white/10 text-zinc-500 hover:text-white transition-colors"
+                                    title="Refresh List"
+                                >
+                                    <RefreshCw size={16} />
+                                </button>
+                            </div>
                             <p className="text-zinc-400">Hall of fame for our generous supporters.</p>
                         </div>
 
