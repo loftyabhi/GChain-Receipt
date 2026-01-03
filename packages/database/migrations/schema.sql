@@ -183,29 +183,76 @@ EXECUTE FUNCTION prevent_bill_update();
 -- 6. CACHING & INDEXING
 -- -----------------------------------------------------------------------------
 
--- State tracking for blockchain indexers
--- [TIER-2] RLS: Enabled. Private to Service Role only.
-CREATE TABLE IF NOT EXISTS indexer_state (
-    key VARCHAR(50) PRIMARY KEY, -- e.g., 'contributors_sync'
-    last_synced_block BIGINT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-ALTER TABLE indexer_state ENABLE ROW LEVEL SECURITY;
-
 -- Cached Contributors Data (Public Good Support)
 -- [TIER-2] RLS: Enabled. Public Read, Service Role Write.
 CREATE TABLE IF NOT EXISTS contributors (
-    wallet_address VARCHAR(42) PRIMARY KEY,
+    wallet_address VARCHAR(42) NOT NULL,
+    -- [HARDENING] Added chain_id for multi-chain support
+    chain_id INT NOT NULL,
     total_amount_wei NUMERIC(78, 0) DEFAULT 0,
     contribution_count INT DEFAULT 0,
     last_contribution_at TIMESTAMP,
     is_anonymous BOOLEAN DEFAULT FALSE,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (wallet_address, chain_id)
 );
 ALTER TABLE contributors ENABLE ROW LEVEL SECURITY;
 
 -- Indexes for Contributor Sorting
 CREATE INDEX idx_contributors_total ON contributors(total_amount_wei DESC);
+
+-- -----------------------------------------------------------------------------
+-- 8. INDEXER EVENTS & TRIGGERS
+-- -----------------------------------------------------------------------------
+
+-- [NEW] Raw Events Table (Immutable Log)
+CREATE TABLE IF NOT EXISTS contributor_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chain_id INT NOT NULL,
+    tx_hash VARCHAR(66) NOT NULL,
+    log_index INT NOT NULL,
+    block_number BIGINT NOT NULL,
+    block_timestamp TIMESTAMP,
+    donor_address VARCHAR(42) NOT NULL,
+    amount_wei NUMERIC(78, 0) NOT NULL,
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- [CRITICAL] Idempotency: Unique per log entry
+    UNIQUE(chain_id, tx_hash, log_index)
+);
+ALTER TABLE contributor_events ENABLE ROW LEVEL SECURITY;
+
+-- [NEW] Trigger Function for Auto-Aggregation
+CREATE OR REPLACE FUNCTION update_contributors() RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO contributors (wallet_address, chain_id, total_amount_wei, contribution_count, last_contribution_at, updated_at)
+  VALUES (NEW.donor_address, NEW.chain_id, NEW.amount_wei, 1, NEW.block_timestamp, NOW())
+  ON CONFLICT (wallet_address, chain_id)
+  DO UPDATE SET
+    total_amount_wei = contributors.total_amount_wei + NEW.amount_wei,
+    contribution_count = contributors.contribution_count + 1,
+    last_contribution_at = NEW.block_timestamp,
+    updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Apply Trigger
+DROP TRIGGER IF EXISTS trg_update_contributors ON contributor_events;
+CREATE TRIGGER trg_update_contributors
+AFTER INSERT ON contributor_events
+FOR EACH ROW EXECUTE FUNCTION update_contributors();
+
+-- [UPDATE] Indexer State with Validation
+CREATE TABLE IF NOT EXISTS indexer_state (
+    key VARCHAR(50),
+    chain_id INT NOT NULL,
+    last_synced_block BIGINT NOT NULL CHECK (last_synced_block >= 0),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (key, chain_id)
+);
+ALTER TABLE indexer_state ENABLE ROW LEVEL SECURITY;
 
 -- -----------------------------------------------------------------------------
 -- 7. ROW LEVEL SECURITY POLICIES
@@ -229,6 +276,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bills ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ad_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contributor_events ENABLE ROW LEVEL SECURITY;
 
 -- Allow Public Read on Chains/Plans/Ads (needed for UI if using Supabase Client)
 CREATE POLICY "Public can view chains" ON chains FOR SELECT USING (true);
@@ -239,5 +287,44 @@ CREATE POLICY "Public can view ads" ON ad_profiles FOR SELECT USING (true);
 -- Since we use wallet_address, we could allow users to select WHERE wallet_address = auth.uid() 
 -- BUT our auth.uid() is likely not the wallet address in this architecture yet.
 -- For now, we leave them with NO public policies (Service Role / Backend API access only).
+
+
+-- [NEW] Atomic Ingestion RPC (Required for Supabase-js Transaction)
+CREATE OR REPLACE FUNCTION ingest_contributor_events(
+    p_chain_id INT,
+    p_key VARCHAR,
+    p_new_cursor BIGINT,
+    p_events JSONB
+) RETURNS VOID AS $$
+DECLARE
+    event_record JSONB;
+BEGIN
+    -- 1. Insert Events (Idempotent)
+    FOR event_record IN SELECT * FROM jsonb_array_elements(p_events)
+    LOOP
+        INSERT INTO contributor_events (
+            chain_id, tx_hash, log_index, block_number, block_timestamp,
+            donor_address, amount_wei, message
+        ) VALUES (
+            p_chain_id,
+            (event_record->>'tx_hash')::VARCHAR,
+            (event_record->>'log_index')::INT,
+            (event_record->>'block_number')::BIGINT,
+            (event_record->>'block_timestamp')::TIMESTAMP,
+            (event_record->>'donor_address')::VARCHAR,
+            (event_record->>'amount_wei')::NUMERIC,
+             event_record->>'message'
+        )
+        ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING;
+    END LOOP;
+
+    -- 2. Update Cursor (Atomic)
+    INSERT INTO indexer_state (key, chain_id, last_synced_block, updated_at)
+    VALUES (p_key, p_chain_id, p_new_cursor, NOW())
+    ON CONFLICT (key, chain_id)
+    DO UPDATE SET last_synced_block = p_new_cursor, updated_at = NOW();
+
+END;
+$$ LANGUAGE plpgsql;
 
 

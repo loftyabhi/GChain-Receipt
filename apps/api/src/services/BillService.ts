@@ -905,19 +905,35 @@ export class BillService {
     }
     private async saveToDb(txHash: string, chainId: number, wallet: string, data: BillViewModel, isConfirmed: boolean) {
         try {
-            await supabase.from('bills').upsert({
-                tx_hash: txHash,
-                chain_id: chainId,
-                wallet_address: wallet || null,
-                bill_json: data,
-                status: isConfirmed ? 'COMPLETED' : 'PENDING',
-                updated_at: new Date().toISOString() // Resets timer
-            }, { onConflict: 'tx_hash,chain_id' });
+            await this.performUpsert(txHash, chainId, wallet, data, isConfirmed);
         } catch (e) {
-            console.warn('[BillService] Failed to save to DB cache', e);
+            console.warn('[BillService] First save attempt failed. Retrying without wallet...', e);
+            // Retry without wallet (Foreign Key Violation fallback)
+            try {
+                await this.performUpsert(txHash, chainId, null, data, isConfirmed);
+            } catch (retryError) {
+                console.error('[BillService] CRITICAL: Failed to save to DB cache even without wallet.', retryError);
+            }
         }
     }
 
+    private async performUpsert(txHash: string, chainId: number, wallet: string | null, data: BillViewModel, isConfirmed: boolean) {
+        const payload: any = {
+            tx_hash: txHash,
+            chain_id: chainId,
+            bill_json: data,
+            status: isConfirmed ? 'COMPLETED' : 'PENDING',
+            updated_at: new Date().toISOString()
+        };
+
+        // Only include wallet_address if explicitly provided and not null
+        if (wallet) {
+            payload.wallet_address = wallet;
+        }
+
+        const { error } = await supabase.from('bills').upsert(payload, { onConflict: 'tx_hash,chain_id' });
+        if (error) throw error;
+    }
     private async touchBill(txHash: string, chainId: number) {
         // Just update updated_at to now
         await supabase

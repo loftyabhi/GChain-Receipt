@@ -17,6 +17,11 @@ app.use(cors());
 app.use(express.json());
 
 import { supabase } from './lib/supabase';
+import { IndexerService } from './services/IndexerService';
+
+// Start Background Services
+const indexer = new IndexerService();
+indexer.start().catch(err => console.error('[Main] Indexer Start Failed', err));
 
 // Serve generated PDFs via Supabase Redirect
 app.get('/bills/:fileName', async (req: Request, res: Response) => {
