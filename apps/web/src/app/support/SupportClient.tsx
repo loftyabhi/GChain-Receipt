@@ -5,8 +5,8 @@ import { motion } from 'framer-motion';
 import { Wallet, Shield, Zap, Globe, Heart, ArrowRight, User, Loader2 } from 'lucide-react';
 import { useAccount, useWriteContract, useSwitchChain, useChainId } from 'wagmi';
 import { parseEther } from 'viem';
-import { useAppKit } from '@reown/appkit/react';
-import { baseSepolia } from '@reown/appkit/networks';
+// Removed AppKit imports
+import { baseSepolia } from 'wagmi/chains';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 
@@ -26,7 +26,7 @@ const ROADMAP_ITEMS = [
 
 export default function SupportClient() {
     const { address, isConnected } = useAccount();
-    const { open } = useAppKit();
+    // Removed useAppKit
     const [contributionAmount, setContributionAmount] = useState('');
     const [topContributors, setTopContributors] = useState<any[]>([]);
 
@@ -56,7 +56,7 @@ export default function SupportClient() {
 
     const handleContribute = async () => {
         if (!isConnected) {
-            open();
+            toast.info("Please connect your wallet in the navigation bar first.");
             return;
         }
 

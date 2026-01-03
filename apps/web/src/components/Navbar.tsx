@@ -4,8 +4,7 @@ import { useState, useEffect } from 'react';
 
 import Link from 'next/link';
 import { formatEther } from 'viem';
-import { useAccount, useBalance, useEnsName } from 'wagmi';
-import { useAppKit } from '@reown/appkit/react';
+import { useAccount, useBalance, useEnsName, useConnect, useDisconnect } from 'wagmi';
 
 const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS;
 
@@ -13,9 +12,11 @@ export function Navbar() {
     const { address, isConnected } = useAccount();
     const { data: balance } = useBalance({ address });
     const { data: ensName } = useEnsName({ address });
-    const { open } = useAppKit();
+    const { connect, connectors } = useConnect();
+    const { disconnect } = useDisconnect();
     const [isAdmin, setIsAdmin] = useState(false);
     const [mounted, setMounted] = useState(false);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     useEffect(() => {
         setMounted(true);
@@ -25,6 +26,19 @@ export function Navbar() {
             setIsAdmin(false);
         }
     }, [address]);
+
+    const handleConnect = () => {
+        // Simple priority connection strategy for this hotfix:
+        // 1. MetaMask
+        // 2. Injected
+        // 3. First available
+        const preferred = connectors.find(c => c.name === 'MetaMask') || connectors.find(c => c.id === 'injected') || connectors[0];
+        if (preferred) {
+            connect({ connector: preferred });
+        } else {
+            alert('No suitable wallet connector found');
+        }
+    };
 
     if (!mounted) return null;
 
@@ -50,39 +64,52 @@ export function Navbar() {
                         </div>
 
                         <div className="flex items-center gap-3">
-                            <appkit-network-button />
+                            {/* AppKit Network Button Removed */}
 
                             {!isConnected ? (
                                 <button
-                                    onClick={() => open()}
+                                    onClick={handleConnect}
                                     className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 hover:bg-violet-500 transition-all hover:scale-105 active:scale-95"
                                 >
                                     Connect Wallet
                                 </button>
                             ) : (
-                                <button
-                                    onClick={() => open()}
-                                    className="flex items-center gap-3 rounded-xl bg-white/5 border border-white/10 px-4 py-2 hover:bg-white/10 transition-all hover:scale-[1.02] active:scale-[0.98] group"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-sm font-medium text-gray-200 group-hover:text-white transition-colors">
-                                            {balance?.value ? parseFloat(formatEther(balance.value)).toFixed(3) : '0.000'} {balance?.symbol}
-                                        </span>
-                                        <div className="h-4 w-[1px] bg-white/10"></div>
-                                        <div className="flex items-center gap-2">
-                                            <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 p-[1px]">
-                                                <div className="h-full w-full rounded-full bg-black flex items-center justify-center">
-                                                    <span className="text-[10px] text-white font-mono">
-                                                        {ensName ? ensName.slice(0, 2).toUpperCase() : address?.slice(2, 4)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <span className="text-sm font-medium text-gray-400 group-hover:text-gray-300 transition-colors">
-                                                {ensName ? ensName : `${address?.slice(0, 6)}...${address?.slice(-4)}`}
+                                <div className="relative group">
+                                    <button
+                                        className="flex items-center gap-3 rounded-xl bg-white/5 border border-white/10 px-4 py-2 hover:bg-white/10 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-sm font-medium text-gray-200 group-hover:text-white transition-colors">
+                                                {balance?.value ? parseFloat(formatEther(balance.value)).toFixed(3) : '0.000'} {balance?.symbol}
                                             </span>
+                                            <div className="h-4 w-[1px] bg-white/10"></div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 p-[1px]">
+                                                    <div className="h-full w-full rounded-full bg-black flex items-center justify-center">
+                                                        <span className="text-[10px] text-white font-mono">
+                                                            {ensName ? ensName.slice(0, 2).toUpperCase() : address?.slice(2, 4)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span className="text-sm font-medium text-gray-400 group-hover:text-gray-300 transition-colors">
+                                                    {ensName ? ensName : `${address?.slice(0, 6)}...${address?.slice(-4)}`}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </button>
+
+                                    {/* Dropdown for Disconnect */}
+                                    <div className="absolute right-0 top-full mt-2 w-48 origin-top-right rounded-xl bg-[#111] border border-white/10 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                                        <div className="p-1">
+                                            <button
+                                                onClick={() => disconnect()}
+                                                className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                                            >
+                                                Disconnect
+                                            </button>
                                         </div>
                                     </div>
-                                </button>
+                                </div>
                             )}
                         </div>
                     </div>
