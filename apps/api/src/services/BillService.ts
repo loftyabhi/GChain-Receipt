@@ -18,6 +18,7 @@ export interface BillRequest {
     txHash: string;
     chainId: number;
     connectedWallet?: string;
+    forceRegenerate?: boolean; // New flag for Self-Healing
 }
 
 export interface BillResponse {
@@ -233,10 +234,11 @@ export class BillService {
 
         console.log(`[BillService] Recovered hash ${foundHash} for ${cleanId}`);
 
-        // 3. Trigger Generation (which will update DB and Storage)
+        // 3. Trigger Generation (FORCE REGENERATE to bypass DB Cache)
         await this.generateBill({
             txHash: foundHash,
             chainId: chainId,
+            forceRegenerate: true
             // We don't have connected wallet here, so it will be "Unclaimed" in DB for now
             // or resolve from 'from' address.
         });
@@ -279,7 +281,7 @@ export class BillService {
                 .eq('chain_id', chainId)
                 .single();
 
-            if (dbBill && dbBill.bill_json) {
+            if (dbBill && dbBill.bill_json && !request.forceRegenerate) {
                 console.log(`[BillService] DB Cache Hit! Returning existing bill.`);
 
                 // Sliding Window: Reset deletion timer on access
@@ -289,6 +291,10 @@ export class BillService {
                     pdfPath: publicPath,
                     billData: dbBill.bill_json as BillViewModel
                 };
+            }
+
+            if (request.forceRegenerate) {
+                console.log(`[BillService] Force Regenerate is ON: Bypassing Cache.`);
             }
 
             // Fallback: Check Storage (Legacy/PDF check)
