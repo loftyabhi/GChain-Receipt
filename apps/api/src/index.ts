@@ -150,7 +150,7 @@ app.post('/api/v1/indexer/trigger', async (req: Request, res: Response) => {
     // Best practice for "Serverless-Safe": Await it, or use a proper Queue.
     // For now, let's await it to ensure it runs at least one batch.
     // Use ?force=true to override locks if needed.
-    const force = req.query.force === 'true' || req.body.force === true;
+    const force = req.query?.force === 'true' || req.body?.force === true;
 
     // We launch it in background if it takes too long? 
     // API timeout is usually 10s-60s. Indexing 10 blocks is fast.
