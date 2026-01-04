@@ -6,6 +6,7 @@
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
+    "cron:indexer": "ts-node scripts/trigger_indexer.ts",
     "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {

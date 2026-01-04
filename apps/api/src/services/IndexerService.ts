@@ -105,64 +105,131 @@ export class IndexerService {
 
         const startBlock = BigInt(lease.start_block);
 
-        // 2. Determine Range
+        // 2. Loop until caught up or time limit reached (e.g. 50s for serverless)
+        const TIME_LIMIT_MS = 50 * 1000;
+        const startTime = Date.now();
+        let loopCount = 0;
+
+        // Lease is for the *run*, but we update cursor incrementally.
+        // We need to be careful with the "Throttle" check. 
+        // If we acquired the lock, we own it.
+
+        // Initial fetched block (already have it from lease)
+        let currentBlockVal = Number(startBlock);
+
+        // Fetch Latest Block once
         let latestBlock: number;
         try {
             latestBlock = await this.provider.getBlockNumber();
         } catch (err) {
             console.error('[Indexer] network failure: getBlockNumber', err);
-            return; // Lock expires naturally
-        }
-
-        const currentBlockVal = Number(startBlock);
-
-        if (currentBlockVal >= latestBlock) {
-            console.log(`[Indexer] Idle. Cursor: ${currentBlockVal} (Latest: ${latestBlock})`);
-            await this.releaseLock(currentBlockVal);
             return;
         }
 
-        let toBlock = currentBlockVal + BATCH_SIZE - 1;
-        if (toBlock > latestBlock) toBlock = latestBlock;
+        console.log(`[Indexer] Starting sync. Cursor: ${currentBlockVal}, Target: ${latestBlock}, Batch: ${BATCH_SIZE}`);
 
-        // OBSERVABILITY: Log Range
-        console.log(`[Indexer] LEASED: ${currentBlockVal} -> ${toBlock} (${toBlock - currentBlockVal + 1} blocks) | Owner: ${this.ownerId}`);
-
-        // 3. Fetch Logs
-        try {
-            const filter = this.contract.filters.Contributed();
-            const events = await this.contract.queryFilter(filter, currentBlockVal, toBlock);
-
-            // OBSERVABILITY: Log Events Found
-            if (events.length > 0) {
-                console.log(`[Indexer] FOUND ${events.length} events in range.`);
+        while (currentBlockVal < latestBlock) {
+            // Check Timeout
+            if (Date.now() - startTime > TIME_LIMIT_MS) {
+                console.log(`[Indexer] Time limit reached (${loopCount} batches). Yielding.`);
+                break;
             }
 
-            // 4. Process (Fetch Timestamps)
-            const eventPayload = await this.processEvents(events);
+            let toBlock = currentBlockVal + BATCH_SIZE - 1;
+            if (toBlock > latestBlock) toBlock = latestBlock;
 
-            // 5. Commit & Unlock
-            // Rule: cursor = max(scanned_block) + 1
-            // We scanned up to `toBlock` (inclusive).
-            // Even if 0 events, we successfully scanned this range.
-            const newCursor = toBlock + 1;
+            // 3. Fetch Logs
+            try {
+                const filter = this.contract.filters.Contributed();
+                const events = await this.contract.queryFilter(filter, currentBlockVal, toBlock);
 
-            const { error: ingestError } = await supabase.rpc('ingest_contributor_events', {
-                p_chain_id: CHAIN_ID,
-                p_key: 'contributors_sync',
-                p_new_cursor: newCursor,
-                p_events: eventPayload
-            });
+                if (events.length > 0) {
+                    console.log(`[Indexer] Found ${events.length} events in range ${currentBlockVal}-${toBlock}`);
+                }
 
-            if (ingestError) throw ingestError;
+                // 4. Process (Fetch Timestamps)
+                const eventPayload = await this.processEvents(events);
 
-            // OBSERVABILITY: Log Success
-            console.log(`[Indexer] SUCCESS: Cursor advanced ${currentBlockVal} -> ${newCursor}. Events Ingested: ${eventPayload.length}`);
+                // 5. Commit & Unlock (Incremental)
+                const newCursor = toBlock + 1;
 
-        } catch (err) {
-            console.error(`[Indexer] FAILED range ${currentBlockVal}->${toBlock}:`, err);
-            // Lock expires naturally, allowing retry.
+                // We update the DB state *every batch* to save progress.
+                // We keep the owner_id so we don't lose the lock (if we wanted to keep it).
+                // But `ingest_contributor_events` currently clears the lock.
+                // We should probably modify `ingest_contributor_events` or just accept that we re-acquire?
+                // Actually, `ingest_contributor_events` clears `locked_until`.
+                // If we want to loop, we should probably conceptually "extend" the lease or just quickly re-grab?
+                // Re-grabbing might hit the throttle if we finished successfully.
+
+                // Hack for now: The previous implementation unlocked at the end. 
+                // Since `ingest_contributor_events` unlocks, we will lose the lock after the first batch.
+                // This defeats the point of the loop if we can't write.
+
+                // Let's use a modified ingest that DOES NOT unlock if we plan to continue?
+                // Or simply: Call `claim_indexer_scan` again? 
+                // But `claim_indexer_scan` will throttle us because `last_success_at` was just updated!
+
+                // FIX: We need to update the cursor WITHOUT setting `last_success_at` or clearing lock until the VERY END.
+                // However, `ingest_contributor_events` is a "do all" RPC.
+
+                // STRATEGY CHANGE: 
+                // We will Aggregate ALL events in memory? No, memory risk.
+                // We will use standard update but pass a flag? 
+                // Given constraints, I will rely on the `sync` function changing to only call `ingest` at the end? 
+                // No, if it crashes after 40 batches we lose progress.
+
+                // Better Strategy:
+                // Commit batches, but bypass throttle on subsequent loop iterations?
+                // We can't simply bypass throttle without `force=true`.
+                // But we are inside the service.
+
+                // Let's just USE `force=true` for internal loop iterations specifically.
+
+                const { error: ingestError } = await supabase.rpc('ingest_contributor_events', {
+                    p_chain_id: CHAIN_ID,
+                    p_key: 'contributors_sync',
+                    p_new_cursor: newCursor,
+                    p_events: eventPayload
+                });
+
+                if (ingestError) throw ingestError;
+
+                // Move forward
+                currentBlockVal = newCursor;
+                loopCount++;
+
+                // If we want to continue, we need to implicitly "claim" again for the next batch.
+                // But `ingest` unlocked it.
+                // So next iteration needs to re-claim.
+                // We set `force=true` for the subsequent re-claims to bypass our own "just success" throttle.
+
+                // Small sleep to be nice to RPC
+                await new Promise(r => setTimeout(r, 200));
+
+                // Re-prepare for next loop:
+                if (currentBlockVal < latestBlock) {
+                    // Re-claim immediately to continue
+                    const { data: nextLease } = await supabase.rpc('claim_indexer_scan', {
+                        p_chain_id: CHAIN_ID,
+                        p_key: 'contributors_sync',
+                        p_owner_id: this.ownerId,
+                        p_force: true, // Internal loop forces continuation
+                        p_batch_size: BATCH_SIZE
+                    });
+                    if (!nextLease || !nextLease.allowed) {
+                        console.warn("[Indexer] Lost lock during loop. Stopping.");
+                        break;
+                    }
+                }
+
+            } catch (err) {
+                console.error(`[Indexer] FAILED range ${currentBlockVal}->${toBlock}:`, err);
+                // If fail, we break loop and wait for next cron
+                break;
+            }
         }
+
+        console.log(`[Indexer] Batch run finished. Processed ${loopCount} batches.`);
     }
 
     private async releaseLock(currentCursor: number) {
