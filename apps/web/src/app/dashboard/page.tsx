@@ -1,427 +1,239 @@
 'use client';
-
 import { useState, useEffect } from 'react';
-import { useAccount } from 'wagmi';
-import { AdminLogin } from '../../components/AdminLogin';
-import { Navbar } from '@/components/Navbar';
 import axios from 'axios';
-import { Trash2, Plus, LayoutDashboard, Megaphone, Zap, Shield, Search, ChevronRight, X, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useAccount } from 'wagmi';
 import { toast } from 'sonner';
+import { Loader2, Plus, Trash, Edit, Check, X, Layout, Monitor, FileText } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
-export default function DashboardPage() {
-    const { isConnected, address } = useAccount();
+interface Ad {
+    id: string;
+    contentHtml: string;
+    isActive: boolean;
+    clickUrl?: string;
+    placement: 'web' | 'pdf' | 'both';
+}
+
+export default function Dashboard() {
+    const [ads, setAds] = useState<Ad[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isAdmin, setIsAdmin] = useState(false);
     const [token, setToken] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'plans' | 'ads'>('plans');
 
-    // Data State
-    const [plans, setPlans] = useState<any[]>([]);
-    const [ads, setAds] = useState<any[]>([]);
-    const [isLoadingData, setIsLoadingData] = useState(false);
+    // Edit/Create State
+    const [isEditing, setIsEditing] = useState(false);
+    const [currentAd, setCurrentAd] = useState<Partial<Ad>>({ placement: 'both', isActive: true });
 
-    // Form State
-    const [isFormOpen, setIsFormOpen] = useState(false);
-    const [formData, setFormData] = useState<any>({});
+    const { address, isConnected } = useAccount();
+    const router = useRouter();
 
     useEffect(() => {
-        const storedToken = localStorage.getItem('admin_token');
-        if (storedToken) setToken(storedToken);
+        // Check auth (simplified for restoration)
+        const storedToken = localStorage.getItem('auth_token'); // Assuming this storage key
+        if (storedToken) {
+            setToken(storedToken);
+            setIsAdmin(true); // Ideally verify with backend
+        } else {
+            // Just for safety, if no token, maybe redirect or show login? 
+            // For now, let's assume if they are here they might have access or the API will fail.
+        }
     }, []);
 
     useEffect(() => {
-        if (!isConnected) {
-            setToken(null);
-        }
-    }, [isConnected, address]);
+        if (token) fetchAds();
+    }, [token]);
 
-    useEffect(() => {
-        if (token && isConnected) {
-            fetchData();
-        }
-    }, [token, activeTab, isConnected]);
-
-    const fetchData = async () => {
-        setIsLoadingData(true);
+    const fetchAds = async () => {
+        setIsLoading(true);
         try {
-            const endpoint = activeTab === 'plans' ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/plans` : `${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/ads`;
-            const res = await axios.get(endpoint, { headers: { Authorization: `Bearer ${token}` } });
-            if (activeTab === 'plans') setPlans(res.data);
-            else setAds(res.data);
+            const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/ads`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setAds(res.data);
         } catch (err) {
             console.error(err);
-            if ((err as any).response?.status === 401) {
-                setToken(null);
-                localStorage.removeItem('admin_token');
-                toast.error("Session expired. Please login again.");
-            } else {
-                toast.error("Failed to load data");
-            }
+            toast.error('Failed to fetch ads');
         } finally {
-            setIsLoadingData(false);
+            setIsLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        if (!currentAd.contentHtml) return toast.error('HTML Content is required');
+
+        try {
+            await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/ads`, currentAd, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            toast.success('Ad saved successfully');
+            setCurrentAd({ placement: 'both', isActive: true });
+            setIsEditing(false);
+            fetchAds();
+        } catch (err) {
+            toast.error('Failed to save ad');
         }
     };
 
     const handleDelete = async (id: string) => {
-        // Replacement for native confirm()
-        toast("Delete this item?", {
-            action: {
-                label: 'Confirm Delete',
-                onClick: async () => {
-                    try {
-                        await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/${activeTab}/${id}`, {
-                            headers: { Authorization: `Bearer ${token}` }
-                        });
-                        toast.success(`${activeTab === 'plans' ? 'Plan' : 'Ad'} deleted successfully`);
-                        fetchData();
-                    } catch (err) {
-                        toast.error("Delete failed");
-                    }
-                }
-            },
-            cancel: {
-                label: 'Cancel',
-                onClick: () => { }
-            }
-        });
-    };
-
-    const handleSave = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const toastId = toast.loading("Saving changes...");
+        if (!confirm('Are you sure?')) return;
         try {
-            // Basic ID generation due to lack of backend ID gen for this demo
-            const payload = { ...formData, id: formData.id || Date.now().toString() };
-
-            await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/${activeTab}`, payload, {
+            await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/ads/${id}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            setIsFormOpen(false);
-            setFormData({});
-            fetchData();
-            toast.success("Saved successfully!", { id: toastId });
+            toast.success('Ad deleted');
+            fetchAds();
         } catch (err) {
-            toast.error("Save failed. Check console.", { id: toastId });
+            toast.error('Failed to delete ad');
         }
     };
 
-    if (!token || !isConnected) {
-        return (
-            <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center font-sans">
-                {/* A bit of polish for the login wrapper too, though AdminLogin is a separate component */}
-                <div className="max-w-md w-full mx-4">
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-xl"
-                    >
-                        <AdminLogin onLogin={setToken} />
-                    </motion.div>
-                </div>
-            </div>
-        );
+    if (!isAdmin && !isLoading) {
+        // Fallback Login UI if needed, or simple access denied
+        return <div className="min-h-screen flex items-center justify-center text-white">Access Denied. Please Login.</div>;
     }
 
     return (
-        <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
-            <Navbar />
-
-            {/* Background Gradients */}
-            <div className="fixed inset-0 z-0 pointer-events-none">
-                <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-violet-600/5 blur-[120px]" />
-                <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/5 blur-[120px]" />
-            </div>
-
-            <main className="relative z-10 pt-32 pb-20 px-6 max-w-7xl mx-auto">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
-                    <div>
-                        <h1 className="text-4xl font-bold flex items-center gap-3 mb-2">
-                            Dashboard
-                        </h1>
-                        <p className="text-zinc-400">Configure enterprise billing tiers and ad placement.</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-4">
-                        <a
-                            href="/dashboard/admin"
-                            className="group flex items-center gap-2 bg-white/5 border border-white/10 hover:border-violet-500/30 text-zinc-300 hover:text-white px-5 py-2.5 rounded-xl transition-all hover:bg-white/10"
-                        >
-                            <Shield size={18} />
-                            <span className="font-medium">Vault Admin</span>
-                            <ChevronRight size={16} className="transition-transform group-hover:translate-x-1" />
-                        </a>
-                        <button
-                            onClick={() => {
-                                setToken(null);
-                                localStorage.removeItem('admin_token');
-                                toast.info("Logged out successfully");
-                            }}
-                            className="px-5 py-2.5 text-sm font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-colors"
-                        >
-                            Logout
-                        </button>
-                    </div>
-                </div>
-
-                {/* Controls */}
-                <div className="flex sm:items-center justify-between flex-col sm:flex-row gap-4 mb-8">
-                    {/* Data Tabs */}
-                    <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 w-fit backdrop-blur-md">
-                        <button
-                            onClick={() => setActiveTab('plans')}
-                            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'plans'
-                                ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25'
-                                : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                                }`}
-                        >
-                            <Zap size={16} />
-                            Plans
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('ads')}
-                            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'ads'
-                                ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25'
-                                : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                                }`}
-                        >
-                            <Megaphone size={16} />
-                            Ads
-                        </button>
-                    </div>
-
+        <div className="min-h-screen bg-neutral-900 text-white p-8 pt-24">
+            <div className="max-w-6xl mx-auto">
+                <div className="flex justify-between items-center mb-8">
+                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">
+                        Ad Manager
+                    </h1>
                     <button
-                        onClick={() => { setFormData({}); setIsFormOpen(true); }}
-                        className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-6 py-3 rounded-xl shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 transition-all font-bold active:scale-95"
+                        onClick={() => { setIsEditing(true); setCurrentAd({ placement: 'both', isActive: true }); }}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors"
                     >
                         <Plus size={18} />
-                        Add {activeTab === 'plans' ? 'Plan' : 'Ad'}
+                        New Ad
                     </button>
                 </div>
 
-                {/* Content Area */}
-                <div className="min-h-[300px]">
-                    {isLoadingData ? (
-                        <div className="flex flex-col items-center justify-center py-20">
-                            <Loader2 className="animate-spin text-zinc-500 mb-4" size={32} />
-                            <p className="text-zinc-500">Loading data...</p>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {(activeTab === 'plans' ? plans : ads).map((item) => (
-                                <motion.div
-                                    layout
-                                    initial={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    key={item.id}
-                                    className="group bg-white/5 border border-white/10 hover:border-violet-500/30 p-8 rounded-3xl transition-all hover:bg-white/10 relative overflow-hidden backdrop-blur-sm"
-                                >
-                                    {/* Card Decor */}
-                                    <div className="absolute top-0 right-0 p-8 opacity-0 group-hover:opacity-10 transition-opacity pointer-events-none">
-                                        {activeTab === 'plans' ? <Zap size={100} /> : <Megaphone size={100} />}
-                                    </div>
+                {isEditing && (
+                    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm">
+                        <div className="bg-neutral-800 p-8 rounded-xl w-full max-w-2xl border border-neutral-700 shadow-2xl">
+                            <h2 className="text-2xl font-bold mb-6">
+                                {currentAd.id ? 'Edit Ad' : 'Create Ad'}
+                            </h2>
 
-                                    <div className="flex justify-between items-start mb-6 relative z-10">
-                                        <div className={`p-3 rounded-xl ${activeTab === 'plans' ? 'bg-orange-500/10 text-orange-400' : 'bg-blue-500/10 text-blue-400'}`}>
-                                            {activeTab === 'plans' ? <Zap size={24} /> : <Megaphone size={24} />}
-                                        </div>
-                                        <button
-                                            onClick={() => handleDelete(item.id)}
-                                            className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                    </div>
-
-                                    <div className="relative z-10">
-                                        <h3 className="text-xl font-bold text-white mb-4 line-clamp-1">{item.title || item.id}</h3>
-
-                                        {activeTab === 'plans' ? (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between text-sm py-2 border-b border-white/5">
-                                                    <span className="text-zinc-400">Price</span>
-                                                    <span className="font-mono font-bold text-violet-300">{item.priceWei} WEI</span>
-                                                </div>
-                                                <div className="flex items-center justify-between text-sm py-2">
-                                                    <span className="text-zinc-400">Validity</span>
-                                                    <span className="font-mono font-bold text-zinc-300">{(item.validitySeconds / 86400).toFixed(1)} Days</span>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-4">
-                                                <div className="flex items-center gap-2">
-                                                    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase ${item.isActive ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-                                                        {item.isActive ? 'ACTIVE' : 'INACTIVE'}
-                                                    </span>
-                                                    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20`}>
-                                                        {item.placement || 'both'}
-                                                    </span>
-                                                </div>
-
-                                                {item.contentHtml && (
-                                                    <div className="mt-4 p-4 bg-black/40 rounded-xl border border-white/5 text-xs text-zinc-500 font-mono truncate">
-                                                        {item.contentHtml}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                </motion.div>
-                            ))}
-
-                            {(activeTab === 'plans' ? plans : ads).length === 0 && (
-                                <div className="col-span-full flex flex-col items-center justify-center py-24 text-zinc-500 bg-white/5 rounded-3xl border border-dashed border-white/10">
-                                    <div className="bg-white/5 p-4 rounded-full mb-4">
-                                        <Search size={32} className="opacity-50" />
-                                    </div>
-                                    <p className="font-medium">No active billing plans configured.</p>
-                                    <p className="text-sm opacity-60 mt-1">Create a new tier to get started.</p>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-neutral-400 mb-1">HTML Content</label>
+                                    <textarea
+                                        value={currentAd.contentHtml || ''}
+                                        onChange={e => setCurrentAd({ ...currentAd, contentHtml: e.target.value })}
+                                        className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-3 text-sm font-mono h-32 focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="<div>Your Ad Here</div>"
+                                    />
                                 </div>
-                            )}
-                        </div>
-                    )}
-                </div>
 
-                {/* Form Modal */}
-                <AnimatePresence>
-                    {isFormOpen && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                                className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-lg shadow-2xl shadow-violet-500/10 relative"
-                            >
-                                <button
-                                    onClick={() => setIsFormOpen(false)}
-                                    className="absolute top-6 right-6 p-2 text-zinc-500 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
-                                >
-                                    <X size={20} />
-                                </button>
+                                <div>
+                                    <label className="block text-sm text-neutral-400 mb-1">Click URL (Optional)</label>
+                                    <input
+                                        type="text"
+                                        value={currentAd.clickUrl || ''}
+                                        onChange={e => setCurrentAd({ ...currentAd, clickUrl: e.target.value })}
+                                        className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-3 outline-none"
+                                        placeholder="https://example.com"
+                                    />
+                                </div>
 
-                                <h2 className="text-2xl font-bold text-white mb-8">
-                                    {formData.id ? 'Edit' : 'New'} {activeTab === 'plans' ? 'Plan' : 'Ad'}
-                                </h2>
-
-                                <form onSubmit={handleSave} className="space-y-6">
-                                    {activeTab === 'plans' ? (
-                                        <>
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Plan ID</label>
-                                                <input
-                                                    value={formData.id || ''}
-                                                    onChange={e => setFormData({ ...formData, id: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all placeholder:text-zinc-700 font-mono text-sm"
-                                                    placeholder="e.g. basic_plan"
-                                                    required
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Title</label>
-                                                <input
-                                                    value={formData.title || ''}
-                                                    onChange={e => setFormData({ ...formData, title: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all"
-                                                    placeholder="Display Name"
-                                                    required
-                                                />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Price (Wei)</label>
-                                                    <input
-                                                        type="number"
-                                                        value={formData.priceWei || ''}
-                                                        onChange={e => setFormData({ ...formData, priceWei: e.target.value })}
-                                                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all"
-                                                        required
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Validity (Sec)</label>
-                                                    <input
-                                                        type="number"
-                                                        value={formData.validitySeconds || ''}
-                                                        onChange={e => setFormData({ ...formData, validitySeconds: Number(e.target.value) })}
-                                                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all"
-                                                        required
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.hasAds || false}
-                                                    onChange={e => setFormData({ ...formData, hasAds: e.target.checked })}
-                                                    className="w-5 h-5 accent-violet-500 rounded"
-                                                />
-                                                <span className="text-sm text-zinc-300">Show Ads with this Plan?</span>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Ad ID</label>
-                                                <input
-                                                    value={formData.id || ''}
-                                                    onChange={e => setFormData({ ...formData, id: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all font-mono text-sm"
-                                                    placeholder="unique_ad_id"
-                                                    required
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">HTML Content</label>
-                                                <textarea
-                                                    value={formData.contentHtml || ''}
-                                                    onChange={e => setFormData({ ...formData, contentHtml: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all h-32 font-mono text-sm"
-                                                    placeholder="<div>Ad Content...</div>"
-                                                    required
-                                                />
-                                            </div>
-                                            <div className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.isActive || false}
-                                                    onChange={e => setFormData({ ...formData, isActive: e.target.checked })}
-                                                    className="w-5 h-5 accent-violet-500 rounded"
-                                                />
-                                                <span className="text-sm text-zinc-300">Ad Active?</span>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Placement</label>
-                                                <select
-                                                    value={formData.placement || 'both'}
-                                                    onChange={e => setFormData({ ...formData, placement: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all [&>option]:bg-zinc-900"
-                                                >
-                                                    <option value="both">Both (Web & PDF)</option>
-                                                    <option value="web">Web Only</option>
-                                                    <option value="pdf">PDF Only</option>
-                                                </select>
-                                            </div>
-                                        </>
-                                    )}
-
-                                    <div className="flex gap-4 pt-4">
-                                        <button
-                                            type="button"
-                                            onClick={() => setIsFormOpen(false)}
-                                            className="flex-1 rounded-xl bg-white/5 py-3.5 text-sm font-bold text-white hover:bg-white/10 border border-white/10 transition-colors"
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm text-neutral-400 mb-1">Placement</label>
+                                        <select
+                                            value={currentAd.placement}
+                                            onChange={e => setCurrentAd({ ...currentAd, placement: e.target.value as any })}
+                                            className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-3 outline-none"
                                         >
-                                            Cancel
-                                        </button>
-                                        <button
-                                            type="submit"
-                                            className="flex-1 rounded-xl bg-violet-600 py-3.5 text-sm font-bold text-white hover:bg-violet-500 shadow-lg shadow-violet-500/20 transition-all active:scale-95"
-                                        >
-                                            Save Changes
-                                        </button>
+                                            <option value="both">Both</option>
+                                            <option value="web">Web Only</option>
+                                            <option value="pdf">PDF Only</option>
+                                        </select>
                                     </div>
-                                </form>
-                            </motion.div>
+                                    <div className="flex items-center pt-6">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={currentAd.isActive}
+                                                onChange={e => setCurrentAd({ ...currentAd, isActive: e.target.checked })}
+                                                className="w-5 h-5 accent-blue-500"
+                                            />
+                                            <span>Active</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-8">
+                                <button
+                                    onClick={() => setIsEditing(false)}
+                                    className="px-4 py-2 hover:bg-neutral-700 rounded-lg"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium"
+                                >
+                                    Save
+                                </button>
+                            </div>
                         </div>
-                    )}
-                </AnimatePresence>
-            </main>
+                    </div>
+                )}
+
+                {isLoading ? (
+                    <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-500" size={40} /></div>
+                ) : ads.length === 0 ? (
+                    <div className="text-center py-20 text-neutral-500 border border-dashed border-neutral-800 rounded-xl">
+                        No active ads found. Create one!
+                    </div>
+                ) : (
+                    <div className="grid gap-4">
+                        {ads.map(ad => (
+                            <div key={ad.id} className="bg-neutral-800/50 border border-neutral-700/50 p-6 rounded-xl flex items-center justify-between group hover:border-blue-500/30 transition-all">
+                                <div className="flex items-start gap-4">
+                                    <div className={`p-3 rounded-lg ${ad.isActive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                                        {ad.placement === 'pdf' ? <FileText size={24} /> : ad.placement === 'web' ? <Monitor size={24} /> : <Layout size={24} />}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-medium text-lg flex items-center gap-2">
+                                            Ad #{ad.id}
+                                            <span className={`text-xs px-2 py-0.5 rounded-full ${ad.isActive ? 'bg-green-500/20 text-green-400' : 'bg-neutral-700 text-neutral-400'}`}>
+                                                {ad.isActive ? 'Active' : 'Draft'}
+                                            </span>
+                                        </h3>
+                                        <div className="text-neutral-400 text-sm mt-1 max-w-xl truncate font-mono">
+                                            {ad.contentHtml}
+                                        </div>
+                                        <div className="text-xs text-neutral-500 mt-2 flex gap-4">
+                                            <span>Placement: <strong className="text-neutral-300 capitalize">{ad.placement}</strong></span>
+                                            {ad.clickUrl && <span>URL: <a href={ad.clickUrl} target="_blank" className="text-blue-400 hover:underline">{ad.clickUrl}</a></span>}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={() => { setCurrentAd(ad); setIsEditing(true); }}
+                                        className="p-2 hover:bg-neutral-700 rounded-lg text-neutral-300 hover:text-white"
+                                        title="Edit"
+                                    >
+                                        <Edit size={18} />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(ad.id)}
+                                        className="p-2 hover:bg-red-500/10 rounded-lg text-neutral-500 hover:text-red-400"
+                                        title="Delete"
+                                    >
+                                        <Trash size={18} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

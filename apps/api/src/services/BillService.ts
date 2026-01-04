@@ -1005,7 +1005,7 @@ export class BillService {
             try {
                 // Try to create the user (idempotent)
                 const { error } = await supabase.from('users').upsert(
-                    { wallet_address: wallet, is_registered: false },
+                    { wallet_address: wallet },
                     { onConflict: 'wallet_address', ignoreDuplicates: true } // Don't overwrite existing
                 );
                 if (error) console.warn('[BillService] Failed to auto-create user:', error.message);

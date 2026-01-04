@@ -2,8 +2,8 @@ import { ethers } from 'ethers';
 import { supabase } from '../lib/supabase';
 
 // --- Configuration ---
-const VAULT_ADDRESS = process.env.NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS || "0xYourVaultAddress";
-const CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID ? parseInt(process.env.NEXT_PUBLIC_CHAIN_ID) : 84532; // Default Base Sepolia
+const VAULT_ADDRESS = process.env.NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS || "0x8a9496cdffd16250353ea19b1ff8ce4de4c294cf";
+const CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID ? parseInt(process.env.NEXT_PUBLIC_CHAIN_ID) : 8453; // Default Base Mainnet
 const BATCH_SIZE = 10; // Strict limit for free tier (inclusive range)
 // POLLING is handled by Cron or Trigger, not internal loop.
 
@@ -16,14 +16,39 @@ interface SyncOptions {
 }
 
 export class IndexerService {
-    private provider: ethers.JsonRpcProvider;
+    private provider: ethers.AbstractProvider; // Changed to support Fallback
     private contract: ethers.Contract | null = null;
     private ownerId: string;
 
     constructor() {
-        // Use a robust RPC URL. If this is serverless, connection pooling/handling is key.
-        const rpcUrl = process.env.BASE_RPC_URL || "https://sepolia.base.org";
-        this.provider = new ethers.JsonRpcProvider(rpcUrl);
+        // [RPC CONFIG] Priority: 1. Mainnet Base (hardcoded) 2. ENV Fallback
+        // usage: "first check base.org then try BASE_RPC_URL"
+        const providers: (ethers.JsonRpcProvider | any)[] = [];
+
+        // 1. Primary: Base Mainnet
+        providers.push({
+            provider: new ethers.JsonRpcProvider("https://mainnet.base.org"),
+            priority: 1,
+            weight: 2
+        });
+
+        // 2. Secondary: ENV (if provided)
+        if (process.env.BASE_RPC_URL && process.env.BASE_RPC_URL !== "https://mainnet.base.org") {
+            providers.push({
+                provider: new ethers.JsonRpcProvider(process.env.BASE_RPC_URL),
+                priority: 2,
+                weight: 1
+            });
+        }
+
+        // Use FallbackProvider for redundancy
+        // If only one exists, it behaves like a normal provider.
+        if (providers.length === 1) {
+            this.provider = (providers[0] as any).provider;
+        } else {
+            this.provider = new ethers.FallbackProvider(providers, 1);
+        }
+
         // Unique ID for this instance (stateless execution)
         this.ownerId = `worker-${Math.random().toString(36).substring(7)}`;
     }

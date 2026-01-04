@@ -1,7 +1,7 @@
 -- Database Schema for Chain Receipt
 -- Full Consolidated Schema (Includes Indexer, Ad Placement, and Hardening)
 
--- -----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- 0. CLEANUP (Optional - Use with Caution)
 -- -----------------------------------------------------------------------------
 -- DROP TABLE IF EXISTS contributor_events CASCADE;
@@ -9,7 +9,6 @@
 -- DROP TABLE IF EXISTS contributors CASCADE;
 -- DROP TABLE IF EXISTS bills CASCADE;
 -- DROP TABLE IF EXISTS users CASCADE;
--- DROP TABLE IF EXISTS plans CASCADE;
 -- DROP TABLE IF EXISTS ad_profiles CASCADE;
 -- DROP TABLE IF EXISTS chains CASCADE;
 
@@ -49,33 +48,13 @@ ON CONFLICT (chain_id) DO UPDATE SET
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     wallet_address VARCHAR(42) PRIMARY KEY,
-    is_registered BOOLEAN DEFAULT FALSE,
-    registration_tx VARCHAR(66) UNIQUE,
-    registered_at TIMESTAMP,
-    current_plan_id INT,
-    plan_expiry TIMESTAMP,
     bills_generated INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- -----------------------------------------------------------------------------
--- 3. PLANS
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS plans (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(100) NOT NULL,
-    validity_interval INTERVAL NOT NULL, 
-    price_wei NUMERIC(78, 0) DEFAULT 0,
-    generation_limit INT DEFAULT 10,
-    has_ads BOOLEAN DEFAULT TRUE,
-    can_download_pdf BOOLEAN DEFAULT FALSE,
-    ad_profile_id INT,
-    is_active BOOLEAN DEFAULT TRUE
-);
-
--- -----------------------------------------------------------------------------
--- 4. ADS
+-- 3. ADS
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ad_profiles (
     id SERIAL PRIMARY KEY,
@@ -90,7 +69,7 @@ CREATE TABLE IF NOT EXISTS ad_profiles (
 );
 
 -- -----------------------------------------------------------------------------
--- 5. BILLS
+-- 4. BILLS
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS bills (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -107,11 +86,11 @@ CREATE TABLE IF NOT EXISTS bills (
 );
 
 -- -----------------------------------------------------------------------------
--- 6. CONTRIBUTORS (Public Good Support)
+-- 5. CONTRIBUTORS (Public Good Support)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS contributors (
     wallet_address VARCHAR(42) NOT NULL,
-    chain_id INT NOT NULL DEFAULT 84532, -- Default to Base Sepolia/Base
+    chain_id INT NOT NULL DEFAULT 8453, -- Default to Base Mainnet
     total_amount_wei NUMERIC(78, 0) DEFAULT 0,
     contribution_count INT DEFAULT 0,
     last_contribution_at TIMESTAMP,
@@ -121,11 +100,11 @@ CREATE TABLE IF NOT EXISTS contributors (
 );
 
 -- -----------------------------------------------------------------------------
--- 7. INDEXER STATE
+-- 6. INDEXER STATE
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS indexer_state (
     key VARCHAR(50),
-    chain_id INT NOT NULL DEFAULT 84532,
+    chain_id INT NOT NULL DEFAULT 8453,
     last_synced_block BIGINT NOT NULL CHECK (last_synced_block >= 0),
     -- [NEW] Parallel & Observability Columns
     locked_until TIMESTAMP,
@@ -141,12 +120,12 @@ CREATE TABLE IF NOT EXISTS indexer_state (
 -- Seed Initial Indexer State (Base Sepolia Deployment Block)
 -- This prevents scanning 16M+ empty blocks if state is lost/reset.
 INSERT INTO indexer_state (key, chain_id, last_synced_block)
-VALUES ('contributors_sync', 84532, 35798250)
+VALUES ('contributors_sync', 8453, 40367120)
 ON CONFLICT (key, chain_id) 
 DO UPDATE SET last_synced_block = EXCLUDED.last_synced_block;
 
 -- -----------------------------------------------------------------------------
--- 8. INDEXER EVENTS (Immutable Log)
+-- 7. INDEXER EVENTS (Immutable Log)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS contributor_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -174,7 +153,9 @@ CREATE INDEX IF NOT EXISTS idx_contributors_total ON contributors(total_amount_w
 
 -- FK Hook
 DO $$ BEGIN
-    ALTER TABLE users ADD CONSTRAINT fk_users_plan FOREIGN KEY (current_plan_id) REFERENCES plans(id);
+    -- ALTER TABLE users ADD CONSTRAINT fk_users_plan FOREIGN KEY (current_plan_id) REFERENCES plans(id);
+    -- Constraint removed as plans table is deleted
+    NULL;
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
@@ -425,19 +406,19 @@ FROM indexer_state;
 -- -----------------------------------------------------------------------------
 ALTER TABLE chains ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bills ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ad_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contributors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE indexer_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contributor_events ENABLE ROW LEVEL SECURITY;
 
+-- -----------------------------------------------------------------------------
+-- RLS NOT ENABLED ON PLANS TABLE AS IT IS REMOVED
+-- -----------------------------------------------------------------------------
+
 -- Public Read Policies
 DROP POLICY IF EXISTS "Public can view chains" ON chains;
 CREATE POLICY "Public can view chains" ON chains FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "Public can view plans" ON plans;
-CREATE POLICY "Public can view plans" ON plans FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public can view ads" ON ad_profiles;
 CREATE POLICY "Public can view ads" ON ad_profiles FOR SELECT USING (true);
