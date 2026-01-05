@@ -56,7 +56,10 @@ const queueOptions: QueueOptions = {
             count: 100, // Keep last 100 completed jobs for debugging
             age: 24 * 3600 // Remove jobs older than 24 hours
         },
-        removeOnFail: true
+        removeOnFail: {
+            count: 100, // Keep last 100 failed jobs for debugging
+            age: 24 * 3600 // Remove failed jobs older than 24 hours
+        }
     }
 };
 

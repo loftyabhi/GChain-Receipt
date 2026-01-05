@@ -134,12 +134,28 @@ app.get('/api/v1/bills/job/:id', async (req: Request, res: Response, next: NextF
         const result = job.returnvalue;
         const failedReason = job.failedReason;
 
+        let queuePosition = 0;
+        let estimatedWaitMs = 0;
+
+        if (state === 'waiting') {
+            const waiting = await billQueue.getWaiting();
+            // Note: This is O(N). For massive queues, use Redis rank. For now (<1000), array find is fine.
+            const index = waiting.findIndex(j => j.id === job.id);
+            if (index !== -1) {
+                queuePosition = index + 1;
+                // Estimate: (Pos / Concurrency) * AvgJobTime (e.g. 5s)
+                estimatedWaitMs = Math.ceil(queuePosition / 3) * 5000;
+            }
+        }
+
         res.json({
             id: job.id,
             state, // completed, failed, active, waiting
             data: result ? result.billData : null,
             pdfUrl: result ? result.pdfPath : null,
-            error: failedReason
+            error: failedReason,
+            queuePosition,
+            estimatedWaitMs
         });
 
     } catch (error) {

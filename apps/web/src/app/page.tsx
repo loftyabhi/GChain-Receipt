@@ -59,7 +59,20 @@ export default function Home() {
           const jobRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/bills/job/${jobId}`);
           const jobData = await jobRes.json();
 
-          if (jobData.state === 'completed') {
+          if (!jobRes.ok) {
+            // If job not found or server error, stop polling
+            clearInterval(pollInterval);
+            setLoading(false);
+            toast.error(jobData.error || 'Job not found', { id: toastId });
+            return;
+          }
+
+          if (jobData.state === 'waiting' && jobData.queuePosition > 0) {
+            const waitSec = Math.ceil(jobData.estimatedWaitMs / 1000);
+            toast.loading(`Queued: Position ${jobData.queuePosition} (~${waitSec}s wait)`, { id: toastId });
+          } else if (jobData.state === 'active') {
+            toast.loading("Processing transaction data...", { id: toastId });
+          } else if (jobData.state === 'completed') {
             clearInterval(pollInterval);
             setBillData(jobData.data);
             setPdfUrl(`${process.env.NEXT_PUBLIC_API_URL}${jobData.pdfUrl}`);
