@@ -21,50 +21,11 @@ export class IndexerService {
     private ownerId: string;
 
     constructor() {
-        // [RPC CONFIG] Priority: 1. Mainnet Base (hardcoded) 2. ENV Fallback
-        // usage: "first check base.org then try BASE_RPC_URL"
-        const providers: (ethers.JsonRpcProvider | any)[] = [];
-
-        // Create static network definition to prevent auto-detection mismatch
-        const staticNetwork = new ethers.Network("base", CHAIN_ID);
-
-        // 1. Primary: Base Mainnet
-        providers.push({
-            provider: new ethers.JsonRpcProvider("https://mainnet.base.org", staticNetwork, { staticNetwork: true }),
-            priority: 1,
-            weight: 2
-        });
-
-        // 2. Secondary: ENV (if provided)
-        if (process.env.BASE_RPC_URL && process.env.BASE_RPC_URL !== "https://mainnet.base.org") {
-            const url = process.env.BASE_RPC_URL.toLowerCase();
-            const isSepolia = url.includes('sepolia');
-            const isMainnet = CHAIN_ID === 8453;
-
-            if (isMainnet && isSepolia) {
-                console.warn("[Indexer] Ignoring BASE_RPC_URL (Sepolia detected) for Mainnet chain configuration.");
-            } else {
-                providers.push({
-                    provider: new ethers.JsonRpcProvider(process.env.BASE_RPC_URL, staticNetwork, { staticNetwork: true }),
-                    priority: 2,
-                    weight: 1
-                });
-            }
-        }
-
-        // Use FallbackProvider for redundancy
-        // If only one exists, it behaves like a normal provider.
-        if (providers.length === 1) {
-            this.provider = (providers[0] as any).provider;
-        } else {
-            try {
-                this.provider = new ethers.FallbackProvider(providers, 1);
-            } catch (error: any) {
-                console.warn("[Indexer] FallbackProvider failed (likely network mismatch). Reverting to primary provider only.", error.message);
-                // Fallback to the first provider (Public Node)
-                this.provider = (providers[0] as any).provider;
-            }
-        }
+        // [RPC CONFIG] Simple, clean initialization (Enterprise Fix)
+        // Disable staticNetwork to allow Ethers to auto-detect and lock the correctly chain.
+        // If BASE_RPC_URL is provided, use it; otherwise default to Base Mainnet.
+        const url = process.env.BASE_RPC_URL || "https://mainnet.base.org";
+        this.provider = new ethers.JsonRpcProvider(url);
 
         // Unique ID for this instance (stateless execution)
         this.ownerId = `worker-${Math.random().toString(36).substring(7)}`;
