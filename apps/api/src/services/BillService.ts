@@ -56,8 +56,16 @@ export interface BillViewModel {
     CHAIN_NAME: string;
     CHAIN_ID: number;
     CHAIN_SYMBOL: string;
+    CONTRACT_ADDRESS: string; // New
+    DATE: string; // New
     CHAIN_ICON: string;
     HOME_URL: string;
+
+    // Ad
+    hasAd: boolean;
+    adContent: string;
+    adUrl?: string; // New
+    adId?: string;
 
     // Transaction
     TRANSACTION_HASH: string;
@@ -118,12 +126,10 @@ export interface BillViewModel {
     CURRENT_YEAR: number;
     FRONTEND_URL: string;
     DISCLAIMER_URL: string;
-
-    // Ads
-    hasAd: boolean;
-    adLink: string;
-    adContent: string;
+    CONTACT_URL: string;
 }
+
+
 
 // Internal Data Structures (Pre-View Model)
 interface RawTokenMovement {
@@ -162,6 +168,19 @@ const formatUsd = (val: number): string => {
     if (val === 0) return "0.00";
     if (val < 0.01) return "< 0.01";
     return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const getChainIcon = (chainId: number): string => {
+    switch (chainId) {
+        case 1: return "🔷"; // Ethereum
+        case 8453: return "🔵"; // Base
+        case 137: return "🟣"; // Polygon
+        case 10: return "🔴"; // Optimism
+        case 42161: return "💙"; // Arbitrum
+        case 56: return "🟡"; // BSC
+        case 43114: return "🔺"; // Avalanche
+        default: return "⛓️";
+    }
 };
 
 // --- Service ---
@@ -252,6 +271,24 @@ export class BillService {
     async generateBill(request: BillRequest): Promise<BillResponse> {
         const { txHash, chainId } = request;
         console.log(`[BillService] Generating bill for ${txHash} on chain ${chainId}`);
+
+        // 0. Hard Idempotency Check (Enterprise Reliability)
+        // Check DB before ANY RPC calls
+        const { data: existingBill } = await supabase
+            .from('bills')
+            .select('bill_id, bill_json, status')
+            .eq('tx_hash', txHash)
+            .eq('chain_id', chainId)
+            .eq('status', 'COMPLETED') // Ensure it's a valid completed bill
+            .single();
+
+        if (existingBill && existingBill.bill_json && !request.forceRegenerate) {
+            console.log(`[BillService] Cache Hit (Hard Idempotency): ${txHash}`);
+            return {
+                pdfPath: `/print/bill/${existingBill.bill_id}`,
+                billData: existingBill.bill_json as BillViewModel
+            };
+        }
 
         try {
             // 1. Fetch Basic Info first (Cost: 1 RPC Call) to derive the ID
@@ -768,7 +805,9 @@ export class BillService {
             CHAIN_NAME: this.getChainName(chainId),
             CHAIN_ID: chainId,
             CHAIN_SYMBOL: this.getNativeSymbol(chainId),
-            CHAIN_ICON: "", // Removed Emoji
+            CONTRACT_ADDRESS: "0x...", // populated if needed or generic
+            DATE: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+            CHAIN_ICON: getChainIcon(chainId),
             HOME_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
             TRANSACTION_HASH: tx.hash,
             BLOCK_NUMBER: receipt.blockNumber.toLocaleString(),
@@ -809,7 +848,8 @@ export class BillService {
             QR_CODE_DATA_URL: qrCodeDataUrl,
             EXPLORER_URL: this.getExplorerUrl(chainId, tx.hash),
             hasAd: !!randomAd,
-            adLink: randomAd?.clickUrl || "",
+            adUrl: randomAd?.clickUrl || "",
+            adId: randomAd?.id ? String(randomAd.id) : undefined,
             adContent: randomAd?.contentHtml || "",
             INCLUDE_AUDIT: true,
             PRICE_SOURCE: 'Combined Oracle (Hist+Curr)',
@@ -818,7 +858,8 @@ export class BillService {
             CONFIDENCE: Math.round(classification.confidence.score * 100),
             CURRENT_YEAR: new Date().getFullYear(),
             FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
-            DISCLAIMER_URL: process.env.DISCLAIMER_URL || 'http://localhost:3000/disclaimer'
+            DISCLAIMER_URL: process.env.DISCLAIMER_URL || 'http://localhost:3000/disclaimer',
+            CONTACT_URL: process.env.CONTACT_URL || 'http://localhost:3000/contact-us'
         };
     }
 

@@ -51,7 +51,7 @@ export default function Home() {
       }
 
       const jobId = data.jobId;
-      toast.loading("Fetching data from blockchain...", { id: toastId });
+      toast.loading("Queued for processing...", { id: toastId });
 
       // 2. Poll for Completion
       const pollInterval = setInterval(async () => {
@@ -67,10 +67,12 @@ export default function Home() {
             return;
           }
 
-          if (jobData.state === 'waiting' && jobData.queuePosition > 0) {
-            const waitSec = Math.ceil(jobData.estimatedWaitMs / 1000);
-            toast.loading(`Queued: Position ${jobData.queuePosition} (~${waitSec}s wait)`, { id: toastId });
-          } else if (jobData.state === 'active') {
+          if (jobData.state === 'pending') {
+            const pos = jobData.queuePosition || 1;
+            const waitSec = Math.ceil((jobData.estimatedWaitMs || 0) / 1000);
+            const waitMsg = waitSec > 0 ? `~${waitSec}s` : 'soon';
+            toast.loading(`Queue Position: #${pos} (Est. Wait: ${waitMsg})`, { id: toastId });
+          } else if (jobData.state === 'processing') {
             toast.loading("Processing transaction data...", { id: toastId });
           } else if (jobData.state === 'completed') {
             clearInterval(pollInterval);
@@ -83,7 +85,7 @@ export default function Home() {
             setLoading(false);
             toast.error(jobData.error || 'Generation Interrupted', { id: toastId });
           }
-          // else: active/waiting, keep polling
+          // else: active/processing, keep polling
         } catch (pollErr) {
           clearInterval(pollInterval);
           setLoading(false);

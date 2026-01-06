@@ -15,6 +15,7 @@ Chain Receipt is a full-stack application designed to generate detailed financia
 -   **Enterprise Security**: Strict physical separation of frontend and backend runtimes.
 -   **Internal Transactions**: Detailed tracking of smart contract executions.
 -   **Historical Pricing**: Accurate point-in-time valuation.
+-   **Soft Queue Architecture**: Database-backed job management for Free-Tier reliability.
 -   **Smart Layouts**: High-quality, printable PDF layout using Puppeteer.
 
 ## 🏗️ Architecture
@@ -47,7 +48,8 @@ The "Show Your Support" feature uses a **Hybrid Indexing** strategy:
 
 ### Prerequisites
 -   Node.js v18+
--   Redis (for background jobs)
+-   Node.js v18+
+-   PostgreSQL (Supabase)
 -   PostgreSQL
 
 ### Installation

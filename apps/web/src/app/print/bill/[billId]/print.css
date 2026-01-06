@@ -8,41 +8,42 @@
 }
 
 :root {
-    /* Palette: Slate & Indigo - Professional, Trustworthy */
+    /* Fintech Palette: Slate (Inter-compatible) */
     --color-bg: #ffffff;
     --color-surface: #f8fafc;
+    /* Slate 50 */
     --color-border: #e2e8f0;
+    /* Slate 200 */
 
     --color-text-primary: #0f172a;
-    --color-text-secondary: #374151;
-    /* Was #64748b - Darkened */
-    --color-text-tertiary: #4b5563;
-    /* Was #94a3b8 - Darkened */
+    /* Slate 900 */
+    --color-text-secondary: #475569;
+    /* Slate 600 */
+    --color-text-tertiary: #94a3b8;
+    /* Slate 400 */
 
-    --color-accent: #7c3aed;
-    /* Violet 600 */
-    --color-accent-light: #ede9fe;
-    --color-accent-dark: #5b21b6;
+    --color-accent: #2563eb;
+    /* Blue 600 - Trust */
+    --color-accent-light: #eff6ff;
+    --color-accent-dark: #1e40af;
 
-    --color-success: #10b981;
+    --color-success: #059669;
+    /* Emerald 600 */
     --color-success-bg: #ecfdf5;
     --color-success-text: #065f46;
 
-    --color-danger: #ef4444;
+    --color-danger: #dc2626;
+    /* Red 600 */
     --color-danger-bg: #fef2f2;
     --color-danger-text: #991b1b;
-
-    --color-warning: #f59e0b;
-    --color-warning-bg: #fffbeb;
-    --color-warning-text: #92400e;
 
     /* Spacing */
     --space-xs: 4px;
     --space-sm: 8px;
-    --space-md: 16px;
-    --space-lg: 24px;
+    --space-md: 12px;
+    /* Tighter for narrow */
+    --space-lg: 20px;
     --space-xl: 32px;
-    --space-2xl: 48px;
 
     /* Typography */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -50,30 +51,24 @@
 
     /* Radius */
     --radius-sm: 4px;
-    --radius-md: 6px;
-    /* Tighter radius for professional look */
-    --radius-lg: 8px;
+    --radius-md: 8px;
+    /* Softer */
 }
 
 @page {
     size: A4;
-    margin: 20mm;
+    margin: 12.7mm;
+    /* Narrow Margin (0.5 inch) */
 
-    /* Browser default for A4 is usually good, but explicit is better */
     @top-right {
         content: "Page " counter(page) " of " counter(pages);
         font-family: 'Inter', sans-serif;
-        font-size: 10px;
-        color: #64748b;
+        font-size: 8px;
+        color: #94a3b8;
     }
 }
 
-/* 
- * CRITICAL: Hide the global app footer when this stylesheet is loaded.
- * This is necessary because the RootLayout includes the footer, 
- * but we want the print page (even in preview/screen mode) to be clean.
- * We target common footer classes.
- */
+/* Hide Global Navigation/Footer when printing */
 body>footer,
 .footer,
 footer[class*="Footer"] {
@@ -84,18 +79,18 @@ body {
     font-family: var(--font-sans);
     background: var(--color-bg);
     color: var(--color-text-primary);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 11px;
+    /* Slightly smaller for density */
+    line-height: 1.4;
     -webkit-font-smoothing: antialiased;
 }
 
 .page {
     width: 100%;
     min-height: 100vh;
-    position: relative;
-    display: flex;
-    flex-direction: column;
     background: white;
+    padding-top: 60px;
+    /* Space for fixed toolbar on screen */
 }
 
 .page-content {
@@ -127,18 +122,14 @@ body {
     color: var(--color-text-secondary);
 }
 
-.text-tertiary {
-    color: var(--color-text-tertiary);
-}
-
 .text-accent {
     color: var(--color-accent);
 }
 
 .uppercase-label {
-    font-size: 10px;
+    font-size: 9px;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     color: var(--color-text-secondary);
     font-weight: 600;
 }
@@ -146,11 +137,13 @@ body {
 /* ==================== HEADER ==================== */
 .header {
     padding-bottom: var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
-    margin-bottom: var(--space-xl);
+    border-bottom: 2px solid var(--color-text-primary);
+    /* Bold statement line */
+    margin-bottom: var(--space-lg);
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: flex-end;
+    /* Align bottom for clean baseline */
 }
 
 .brand {
@@ -160,27 +153,21 @@ body {
 }
 
 .brand-icon {
-    width: 32px;
-    height: 32px;
-    background: var(--color-text-primary);
-    color: white;
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
+    font-size: 24px;
 }
 
 .brand-info h1 {
-    font-size: 18px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 800;
     color: var(--color-text-primary);
-    line-height: 1.2;
+    letter-spacing: -0.03em;
+    line-height: 1;
 }
 
 .brand-tagline {
     font-size: 10px;
     color: var(--color-text-secondary);
+    margin-top: 2px;
 }
 
 .receipt-meta {
@@ -188,231 +175,176 @@ body {
 }
 
 .receipt-title {
-    font-size: 24px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     font-weight: 700;
-    color: var(--color-text-primary);
-    margin-bottom: var(--space-xs);
-    letter-spacing: -0.02em;
-}
-
-.btn-home {
-    display: inline-block;
-    background: linear-gradient(135deg, #7c3aed, #4f46e5);
-    color: white;
-    text-decoration: none;
-    padding: 8px 16px;
-    border-radius: 8px;
-    /* Slightly rounder */
-    font-weight: 600;
-    font-size: 11px;
-    margin-bottom: 12px;
-    box-shadow: 0 2px 4px rgba(124, 58, 237, 0.2);
+    color: var(--color-text-secondary);
 }
 
 .receipt-id {
     font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--color-text-secondary);
+    font-size: 10px;
+    margin-top: 4px;
+    color: var(--color-text-primary);
+}
+
+/* ==================== KEY METRICS (Grid) ==================== */
+.grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
     background: var(--color-surface);
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    display: inline-block;
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+}
+
+.data-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.data-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.data-value.mono {
+    font-family: var(--font-mono);
+    font-size: 11px;
 }
 
 /* ==================== STATUS BAR ==================== */
 .status-bar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--space-xl);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
-}
-
-.status-indicator {
-    display: flex;
-    align-items: center;
     gap: var(--space-sm);
+    margin-bottom: var(--space-lg);
 }
 
 .status-badge {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    padding: 4px 10px;
-    border-radius: var(--radius-md);
-    /* Soft rect */
+    padding: 4px 8px;
+    border-radius: 99px;
+    /* Pill */
     text-transform: uppercase;
     letter-spacing: 0.05em;
     display: flex;
     align-items: center;
     gap: 6px;
+    border: 1px solid transparent;
 }
 
 .status-badge.confirmed {
     background-color: var(--color-success-bg);
     color: var(--color-success-text);
-    border: 1px solid rgba(16, 185, 129, 0.2);
+    border-color: rgba(16, 185, 129, 0.2);
 }
 
 .status-badge.failed {
     background-color: var(--color-danger-bg);
     color: var(--color-danger-text);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.2);
 }
 
-.status-badge.pending {
-    background-color: var(--color-warning-bg);
-    color: var(--color-warning-text);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-}
-
-.chain-info {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-
-.chain-badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-}
-
-/* ==================== GRID LAYOUTS ==================== */
+/* ==================== PARTICIPANTS ==================== */
 .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--space-lg);
-    margin-bottom: var(--space-xl);
+    margin-bottom: var(--space-lg);
 }
 
-.grid-4 {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-md);
-    margin-bottom: var(--space-xl);
-    padding-bottom: var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
-}
-
-/* ==================== DATA POINTS ==================== */
-.data-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.data-value {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    word-break: break-all;
-}
-
-.data-value.mono {
-    font-family: var(--font-mono);
-    font-size: 12px;
-}
-
-.data-value.large {
-    font-size: 16px;
-}
-
-/* ==================== PARTICIPANTS ==================== */
 .participant-card {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: var(--space-md);
+    background: white;
 }
 
 .participant-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    margin-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--color-border);
     padding-bottom: var(--space-sm);
-    border-bottom: 1px dashed var(--color-border);
+    margin-bottom: var(--space-sm);
+    display: flex;
+    justify-content: center;
+    /* Centered */
+    text-align: center;
 }
 
 .avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: var(--radius-sm);
-    background: linear-gradient(135deg, var(--color-text-secondary), var(--color-text-primary));
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    /* Circular avatars modern look */
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
-    color: white;
-    font-weight: bold;
+    font-size: 12px;
 }
 
 /* ==================== TABLES ==================== */
-.section-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-    margin-bottom: var(--space-md);
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
 .table-container {
     margin-bottom: var(--space-xl);
+}
+
+.section-title {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    color: var(--color-accent-dark);
+    margin-bottom: var(--space-md);
+    text-align: center;
+    border-bottom: 2px solid var(--color-border);
+    padding-bottom: var(--space-xs);
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
 }
 
 th {
-    text-align: left;
-    padding: var(--space-sm) 0;
-    border-bottom: 2px solid var(--color-border);
+    text-align: center;
+    /* Centered headers */
+    padding: var(--space-sm);
+    background: var(--color-surface);
     color: var(--color-text-secondary);
     font-weight: 600;
-    font-size: 10px;
+    font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    white-space: nowrap;
-    /* Prevent wrapping */
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
 }
 
-/* Right align numeric columns specifically via class or nth-child */
 th.text-right {
     text-align: right;
 }
 
 td {
-    padding: var(--space-md) 0;
+    padding: var(--space-sm);
     border-bottom: 1px solid var(--color-border);
-    vertical-align: top;
-}
-
-tr:last-child td {
-    border-bottom: none;
+    vertical-align: middle;
 }
 
 .token-cell {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    font-weight: 600;
 }
 
 .direction-badge {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    text-transform: uppercase;
+    border-radius: 4px;
 }
 
 .direction-in {
@@ -421,156 +353,128 @@ tr:last-child td {
 }
 
 .direction-out {
-    color: var(--color-danger-text);
-    background: var(--color-danger-bg);
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
 }
+
+/* Subtle out */
 
 .amount-positive {
     color: var(--color-success);
     font-weight: 600;
 }
 
-.amount-negative {
-    color: var(--color-text-primary);
-}
-
-/* ==================== FINANCIAL SUMMARY ==================== */
-.financial-summary {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: var(--space-xl);
-}
-
+/* ==================== TOTALS ==================== */
 .summary-box {
-    width: 300px;
+    width: 100%;
     background: var(--color-surface);
     border-radius: var(--radius-md);
-    padding: var(--space-lg);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
 }
 
 .summary-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: var(--space-sm);
-    font-size: 12px;
+    margin-bottom: 4px;
+    font-size: 11px;
 }
 
 .summary-row.total {
-    margin-top: var(--space-md);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--color-border);
+    margin-top: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 2px dashed var(--color-border);
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13px;
     color: var(--color-text-primary);
 }
 
-/* ==================== FOOTER / AD / QR ==================== */
+/* ==================== FOOTER ==================== */
 .document-footer {
-    padding-top: var(--space-xl);
+    margin-top: auto;
+    padding-top: var(--space-lg);
     border-top: 1px solid var(--color-border);
-    /* For print layout, we want this to be at the bottom if possible, or just flow naturally */
-}
-
-.ad-container {
-    margin-bottom: var(--space-lg);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px dashed var(--color-border);
-    border-radius: var(--radius-md);
-    text-align: center;
-    page-break-inside: avoid;
-    break-inside: avoid;
-}
-
-.ad-container img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 4px;
 }
 
 .qr-section {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: var(--space-lg);
-    margin-bottom: var(--space-lg);
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
 }
 
 .qr-image {
-    width: 80px;
-    height: 80px;
-    border: 4px solid white;
-    box-shadow: 0 0 0 1px var(--color-border);
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--color-border);
+    padding: 2px;
 }
 
 .footer-legal {
-    font-size: 9px;
+    font-size: 8px;
     color: var(--color-text-tertiary);
-    text-align: center;
-    max-width: 500px;
-    margin: 0 auto;
+    line-height: 1.4;
 }
 
-/* ==================== AUDIT SECTION ==================== */
-.audit-strip {
-    margin-top: var(--space-lg);
-    padding: var(--space-md);
-    background: #fff;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    /* Prevent splitting across pages */
-    page-break-inside: avoid;
-    break-inside: avoid;
-    display: block;
-}
-
-.audit-title {
-    font-size: 11px;
-    font-weight: 600;
-    margin-bottom: var(--space-md);
-    color: var(--color-text-primary);
-}
-
-/* ==================== PRINT SPECIFIC OVERRIDES ==================== */
+/* Print Overrides */
 @media print {
 
-    /* Hide Global Navigation and Footers from layout.tsx if identifiable */
     nav,
     footer,
     .footer,
     .navbar,
-    .header-global,
-    header:not(.page-content header) {
-        display: none !important;
-    }
-
-    /* Ensure the bill header is visible */
-    .header {
-        display: flex !important;
-    }
-
-    body {
-        background: white;
-        margin: 0;
-        padding: 0;
-    }
-
-    .page {
-        border: none;
-        box-shadow: none;
-        margin: 0;
-        width: 100%;
-        max-width: 100%;
-    }
-
-    /* Hide buttons like "Print" if added to the page */
+    header:not(.page-content header),
     .no-print {
         display: none !important;
     }
 
-    /* Force background colors */
-    body {
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
+    .header {
+        display: flex !important;
     }
+
+    .page {
+        margin: 0;
+        border: none;
+        min-height: 0 !important;
+        /* Fix blank page issue */
+        height: auto !important;
+        padding-top: 0 !important;
+    }
+}
+
+.audit-title {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    color: var(--color-accent-dark);
+    margin-bottom: var(--space-md);
+    text-align: center;
+    border-bottom: 2px solid var(--color-border);
+    padding-bottom: var(--space-xs);
+}
+
+/* --- Running Footer for All Pages --- */
+.running-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--color-border);
+    padding-top: 4px;
+    margin-top: 10px;
+    background: white;
+    z-index: 100;
+    font-size: 9px;
+    color: var(--color-text-secondary);
+}
+
+/* Ensure body has space for running header if needed, 
+   but since we mask it on page 1, we just need padding */
+.page-content {
+    padding-top: 20px;
 }

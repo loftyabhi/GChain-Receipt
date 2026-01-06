@@ -6,8 +6,7 @@ import { z } from 'zod';
 import { AuthService } from './services/AuthService';
 import { AdminService } from './services/AdminService';
 import { BillService } from './services/BillService';
-import { addBillJob, billQueue } from './queue/BillQueue';
-import './queue/BillWorker'; // Start Worker
+import { SoftQueueService } from './services/SoftQueueService';
 
 dotenv.config();
 
@@ -18,17 +17,14 @@ app.use(cors());
 app.use(express.json());
 
 import { supabase } from './lib/supabase';
-// import { IndexerService } from './services/IndexerService'; // MOVED TO LEGACY
 import contributionsRouter from './routes/contributions';
 import tokensRouter from './routes/tokens';
-
-// Start Background Services
-// const indexer = new IndexerService(); // DEPRECATED
 
 // Services
 const authService = new AuthService();
 const adminService = new AdminService();
 const billService = new BillService();
+const softQueueService = new SoftQueueService();
 
 // Register Routes
 app.use('/api/contributions', contributionsRouter);
@@ -118,10 +114,6 @@ app.get('/api/v1/bills/:billId/data', async (req: Request, res: Response) => {
     }
 });
 
-// Services - Initialized above
-// const authService = new AuthService();
-// const adminService = new AdminService();
-
 // --- Schemas ---
 
 const billGenerateSchema = z.object({
@@ -134,10 +126,11 @@ const billGenerateSchema = z.object({
 
 // 1. Health Check
 app.get('/health', (req: Request, res: Response) => {
+    // Basic health check
     res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// 2. Resolve Bill (Async Queue)
+// 2. Resolve Bill (Soft Queue)
 app.post('/api/v1/bills/resolve', async (req: Request, res: Response, next: NextFunction) => {
     try {
         // Validation
@@ -149,17 +142,19 @@ app.post('/api/v1/bills/resolve', async (req: Request, res: Response, next: Next
 
         const { txHash, chainId, connectedWallet } = validation.data;
 
-        console.log(`[API] Received request: ${txHash} -> Adding to Queue`);
+        console.log(`[API] Enqueueing request: ${txHash}`);
 
-        const job = await addBillJob({
-            txHash,
-            chainId,
-            connectedWallet
-        });
+        // Enqueue (Idempotent)
+        const job = await softQueueService.enqueue(txHash, chainId, connectedWallet);
+
+        // Trigger Processing (Redundant but explicit as per plan)
+        // enqueue() calls it internally, but we ensure it runs.
+        setImmediate(() => softQueueService.processNext().catch(e => console.error(e)));
 
         res.json({
             success: true,
-            jobId: job.id,
+            jobId: job.jobId,
+            status: job.status,
             message: 'Request queued'
         });
 
@@ -168,60 +163,39 @@ app.post('/api/v1/bills/resolve', async (req: Request, res: Response, next: Next
     }
 });
 
-// 2.1 Check Job Status
+// 2.1 Check Job Status (Soft Queue)
 app.get('/api/v1/bills/job/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const job = await billQueue.getJob(req.params.id);
+        const status = await softQueueService.getJobStatus(req.params.id);
 
-        if (!job) {
+        if (!status) {
             res.status(404).json({ error: 'Job not found' });
             return;
         }
 
-        const state = await job.getState();
-        const result = job.returnvalue;
-        const failedReason = job.failedReason;
-
-        let queuePosition = 0;
-        let estimatedWaitMs = 0;
-
-        if (state === 'waiting') {
-            const waiting = await billQueue.getWaiting();
-            // Note: This is O(N). For massive queues, use Redis rank. For now (<1000), array find is fine.
-            const index = waiting.findIndex(j => j.id === job.id);
-            if (index !== -1) {
-                queuePosition = index + 1;
-                // Estimate: (Pos / Concurrency) * AvgJobTime (e.g. 5s)
-                estimatedWaitMs = Math.ceil(queuePosition / 3) * 5000;
-            }
+        // Critical: Every poll attempts to advance the queue (Crash Recovery / Wake-up)
+        // This ensures if server restarted, polling clients restart the worker loop.
+        if (status.state === 'pending' || status.state === 'processing') {
+            setImmediate(() => softQueueService.processNext().catch(e => console.error('[SoftQueue] Poll-Trigger Error:', e)));
         }
 
+        // Strict Polling Enforcement: Advise client to wait 2 seconds before next poll
+        res.set('Retry-After', '2');
+
         res.json({
-            id: job.id,
-            state, // completed, failed, active, waiting
-            data: result ? result.billData : null,
-            // Robustness: Use BILL_ID from data if available to construct new route, fallback to path
-            pdfUrl: (result && result.billData && result.billData.BILL_ID)
-                ? `/print/bill/${result.billData.BILL_ID}`
-                : (result ? result.pdfPath : null),
-            error: failedReason,
-            queuePosition,
-            estimatedWaitMs
+            id: status.id,
+            state: status.state,
+            data: status.result?.billData || null,
+            pdfUrl: status.result?.pdfPath || null,
+            error: status.error,
+            queuePosition: status.queuePosition,
+            estimatedWaitMs: status.estimatedWaitMs
         });
 
     } catch (error) {
         next(error);
     }
 });
-
-// 2.2 Trigger Indexer
-// [DEPRECATED] Indexer is now legacy/backfill only. 
-// Use apps/api/scripts/legacy/run_indexer.ts for manual syncs.
-/*
-app.post('/api/v1/indexer/trigger', async (req: Request, res: Response) => {
-    res.status(410).json({ error: "Indexer is deprecated. Use push-based contribution flow." });
-});
-*/
 
 // 3. Admin Login
 app.post('/api/v1/auth/login', async (req: Request, res: Response, next: NextFunction) => {
@@ -233,9 +207,6 @@ app.post('/api/v1/auth/login', async (req: Request, res: Response, next: NextFun
         next(error);
     }
 });
-
-// 4. Oracle Debug Route - REMOVED for Production Security
-// Use Admin Service or internal logs for debugging.
 
 // 5. Admin Routes (Protected)
 
@@ -256,8 +227,6 @@ const verifyAdmin = (req: Request, res: Response, next: NextFunction) => {
         res.status(403).json({ error: 'Invalid or expired token' });
     }
 };
-
-
 
 // Ads
 // Public Random Ad
@@ -305,5 +274,5 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 app.listen(port, () => {
-    console.log(`⚡ Chain Receipt API running on port ${port}`);
+    console.log(`⚡ Chain Receipt API running on port ${port} (SafeQueue Mode)`);
 });

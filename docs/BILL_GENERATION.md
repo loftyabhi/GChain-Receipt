@@ -19,8 +19,12 @@ The Bill Generation system has been migrated from a server-side Puppeteer archit
 *   **Endpoint**: `GET /api/v1/bills/:billId/data`
 *   **Duties**:
     1.  Checks Supabase Storage for existing Bill JSON.
-    2.  If missing, triggers **Self-Healing** (re-fetches blockchain data, constructs ViewModel).
-    3.  Uploads JSON to Storage (Cache).
+    2.  If missing, triggers **Soft Queue** Job (Idempotent).
+    3.  **Soft Queue Worker**:
+        *   Claims job atomically via DB RPC.
+        *   Fetches blockchain data (with concurrency limits).
+        *   Constructs ViewModel.
+        *   Uploads JSON to Storage (Cache).
     4.  Returns JSON to Frontend.
     *   **NO** PDF rendering happens here.
 

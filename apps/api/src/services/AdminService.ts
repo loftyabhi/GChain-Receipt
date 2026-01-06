@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 
 export interface Ad {
     id: string; // DB ID is number
+    name?: string; // Descriptive Name
     contentHtml: string;
     isActive: boolean;
     clickUrl?: string; // Schema: click_url
@@ -31,6 +32,7 @@ export class AdminService {
 
         return data.map((row: any) => ({
             id: row.id.toString(),
+            name: row.name,
             contentHtml: row.html_content,
             isActive: row.is_active,
             clickUrl: row.click_url,
@@ -62,6 +64,7 @@ export class AdminService {
 
         return {
             id: randomRow.id.toString(),
+            name: randomRow.name,
             contentHtml: randomRow.html_content,
             isActive: randomRow.is_active,
             clickUrl: randomRow.click_url,
@@ -71,6 +74,7 @@ export class AdminService {
 
     async saveAd(ad: Ad): Promise<Ad> {
         const dbAd: any = {
+            name: ad.name || null,
             html_content: ad.contentHtml,
             click_url: ad.clickUrl || '',
             is_active: ad.isActive,
@@ -94,6 +98,7 @@ export class AdminService {
 
         return {
             id: data.id.toString(),
+            name: data.name,
             contentHtml: data.html_content,
             isActive: data.is_active,
             clickUrl: data.click_url,

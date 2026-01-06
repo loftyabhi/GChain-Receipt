@@ -463,7 +463,7 @@ export default function DashboardPage() {
                                             </div>
 
                                             <div className="relative z-10">
-                                                <h3 className="text-xl font-bold text-white mb-4 line-clamp-1">{item.title || item.id}</h3>
+                                                <h3 className="text-xl font-bold text-white mb-4 line-clamp-1">{item.name || `Ad #${item.id}`}</h3>
 
                                                 <div className="space-y-4">
                                                     <div className="flex items-center gap-2">
@@ -520,15 +520,26 @@ export default function DashboardPage() {
                                         </h2>
 
                                         <form onSubmit={handleSave} className="space-y-6">
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Ad ID</label>
-                                                <input
-                                                    value={formData.id || ''}
-                                                    onChange={e => setFormData({ ...formData, id: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all font-mono text-sm"
-                                                    placeholder="unique_ad_id"
-                                                    required
-                                                />
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Ad ID (Optional)</label>
+                                                    <input
+                                                        value={formData.id || ''}
+                                                        onChange={e => setFormData({ ...formData, id: e.target.value })}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all font-mono text-sm"
+                                                        placeholder="Auto-assigned"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">Name</label>
+                                                    <input
+                                                        value={formData.name || ''}
+                                                        onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none transition-all text-sm"
+                                                        placeholder="Home Banner"
+                                                        required
+                                                    />
+                                                </div>
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 pl-1">HTML Content</label>

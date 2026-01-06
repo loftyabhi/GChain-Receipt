@@ -20,14 +20,11 @@ The frontend is a Next.js application located in `apps/web`.
     # Show Your Support System
     NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS=0x...
     NEXT_PUBLIC_ADMIN_ADDRESS=0x...
-    NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS=0x...
-    NEXT_PUBLIC_ADMIN_ADDRESS=0x...
-    NEXT_PUBLIC_ALCHEMY_API_KEY=...  # Optional: For high-performance indexing
     
-    # Supabase (Required for Contributor Caching)
+    # Supabase (Required for Contributor Caching & Bill Status)
     NEXT_PUBLIC_SUPABASE_URL=...
     NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-    SUPABASE_SERVICE_ROLE_KEY=... # CRITICAL: Used for secure DB writes (RLS Bypass)
+    ```
 
 ## 2. Backend (Render / Railway)
 
@@ -50,16 +47,29 @@ The backend is a Node.js/Express application located in `apps/api`.
     NODE_ENV=production
     PORT=3000
     DATABASE_URL=...
-    REDIS_URL=... # (Optional) Redis Connection String for Price Oracle Caching.
+    
+    # Soft Queue Configuration (Free Tier Safe)
+    MAX_CONCURRENT_JOBS=2
+    JOB_PROCESSING_TIMEOUT_MINUTES=5
+    BILL_AVG_PROCESS_TIME_SECONDS=6
+    
+    # Feature Flags (Resource Control)
+    ENABLE_ENS=false
+    ENABLE_INTERNAL_TX=false
+    ENABLE_AUTO_CLEANUP=false
+
+    # Keys
     ALCHEMY_API_KEY=...
-    PRIVATE_KEY=...
+    SUPABASE_URL=...
+    SUPABASE_SERVICE_ROLE_KEY=...
     ```
 
 ## 3. Database (Supabase)
 
 -   **Schema Management**:
     -   Migrations are located in `packages/database/migrations`.
-    -   Apply using Supabase CLI or copy SQL from `packages/database/migrations/schema.sql`.
+    -   Apply using Supabase CLI or copy SQL from `packages/database/migrations/*.sql`.
+    -   **Critical**: Ensure `02_soft_queue.sql` and `03_fix_soft_queue_schema.sql` are applied.
 
 ## 4. Smart Contracts (Base Network)
 
@@ -73,12 +83,10 @@ The backend is a Node.js/Express application located in `apps/api`.
 
 ## 5. Security Notes
 
--   **PDF Generation**: The API generates PDFs to `apps/api/public/bills`. Ensure your deployment platform supports ephemeral disk or configure S3 (Recommended for production).
--   **Secrets**: Never add `.env` files to `packages/*`. All secrets must be injected at the App level (`apps/web` or `apps/api`).
+-   **Soft Queue**: The system uses a PostgreSQL-backed queue (`bill_jobs`) to manage load. This eliminates the need for Redis in critical paths.
+-   **Secrets**: Never add `.env` files to `packages/*`. All secrets must be injected at the App level.
 
 ## 6. Wiring Services Together
-
-This section explains how to connect your deployed services.
 
 ### A. Connect Database to Backend (Supabase -> Render)
 
@@ -90,33 +98,29 @@ This section explains how to connect your deployed services.
 2.  **Set Variable in Render**:
     *   Go to your **Render Dashboard** -> Select your API Web Service -> Environment.
     *   Add/Update `DATABASE_URL` with the string you copied.
-    *   *Important*: Replace `[YOUR-PASSWORD]` with your actual database password.
 
 ### B. Connect Backend to Frontend (Render -> Vercel)
 
 1.  **Get Backend URL**:
     *   Go to your **Render Dashboard** -> Select your API Web Service.
-    *   Copy the service URL (e.g., `https://chain-receipt-api.onrender.com`).
+    *   Copy the service URL.
 2.  **Set Variable in Vercel**:
     *   Go to your **Vercel Dashboard** -> Select your Project -> Settings -> Environment Variables.
     *   Add/Update `NEXT_PUBLIC_API_URL` with the Render URL.
-    *   *Note*: Ensure there is NO trailing slash (e.g., correct: `.../api`, incorrect: `.../api/`).
 
 ### C. Web3 & External Services
 
 1.  **WalletConnect (Reown)**:
-    *   Go to [Reown Cloud](https://cloud.reown.com/) (formerly WalletConnect Cloud).
+    *   Go to [Reown Cloud](https://cloud.reown.com/).
     *   Create a project and copy the **Project ID**.
     *   In **Vercel**, set `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`.
 2.  **Alchemy (RPC)**:
     *   Go to [Alchemy Dashboard](https://dashboard.alchemy.com/).
     *   Create a new App (Base Mainnet).
     *   Copy the **API Key**.
-    *   In **Vercel**, set `NEXT_PUBLIC_ALCHEMY_API_KEY`.
     *   In **Render**, set `ALCHEMY_API_KEY`.
 
 ### D. Final Check
 
-1.  **Redeploy Backend**: If you changed Render variables, go to "Manual Deploy" -> "Deploy latest commit" to ensure new variables are picked up.
+1.  **Redeploy Backend**: If you changed Render variables, go to "Manual Deploy" -> "Deploy latest commit".
 2.  **Redeploy Frontend**: If you changed Vercel variables, go to "Deployments" -> Redeploy your latest build.
-

@@ -45,7 +45,9 @@ If you modify a shared package (e.g., `packages/domain`):
 
 ### 5. PDF Generation
 
-The PDF engine is located in `apps/api`.
+The PDF engine has been migrated to a **Client-Side** architecture.
+-   **Backend**: `apps/api` handles data fetching and caching (Soft Queue).
+-   **Frontend**: `apps/web/src/app/print/bill/[id]` handles the actual rendering.
 -   **Templates**: Located in `apps/api/templates`.
 -   **Verification**: Run `npx ts-node tools/verification/verify_bill_service_v2.ts` to test PDF generation without running the full server.
 

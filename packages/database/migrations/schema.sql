@@ -470,3 +470,63 @@ CREATE TRIGGER pending_contributions_updated_at BEFORE UPDATE ON pending_contrib
 
 -- Enable RLS
 ALTER TABLE pending_contributions ENABLE ROW LEVEL SECURITY;
+
+-- -----------------------------------------------------------------------------
+-- 10. BILL GENERATION SOFT QUEUE (Free-Tier Safe)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS bill_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tx_hash TEXT NOT NULL,
+    chain_id INT NOT NULL,
+    status TEXT CHECK (status IN ('pending', 'processing', 'completed', 'failed')) DEFAULT 'pending',
+    bill_id TEXT, -- Populated upon completion
+    error TEXT,
+    queue_position INT DEFAULT 0, -- Deprecated, dynamic calculation used
+    metadata JSONB DEFAULT '{}',  -- [NEW] Stores connectedWallet, etc.
+    heartbeat_at TIMESTAMPTZ,     -- [NEW] For active crash detection
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ensure only one active job per transaction
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_tx_chain ON bill_jobs(tx_hash, chain_id);
+
+-- Efficient polling & crash recovery
+CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON bill_jobs(status, created_at);
+
+-- Trigger to auto-update timestamp
+DROP TRIGGER IF EXISTS bill_jobs_updated_at ON bill_jobs;
+CREATE TRIGGER bill_jobs_updated_at BEFORE UPDATE ON bill_jobs FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+-- RLS
+ALTER TABLE bill_jobs ENABLE ROW LEVEL SECURITY;
+
+-- Public Policies
+DROP POLICY IF EXISTS "Public can view jobs" ON bill_jobs;
+CREATE POLICY "Public can view jobs" ON bill_jobs FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public can insert jobs" ON bill_jobs;
+CREATE POLICY "Public can insert jobs" ON bill_jobs FOR INSERT WITH CHECK (true);
+
+-- -----------------------------------------------------------------------------
+-- ATOMIC CLAIM RPC (CRITICAL FOR CONCURRENCY)
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claim_next_bill_job()
+RETURNS TABLE(id uuid, tx_hash text, chain_id int, metadata jsonb) AS $$
+BEGIN
+  RETURN QUERY
+  UPDATE bill_jobs
+  SET status = 'processing',
+      updated_at = now(),
+      heartbeat_at = now()
+  WHERE bill_jobs.id = (
+    SELECT bill_jobs.id FROM bill_jobs
+    WHERE status = 'pending'
+    ORDER BY created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+  )
+  RETURNING bill_jobs.id, bill_jobs.tx_hash, bill_jobs.chain_id, bill_jobs.metadata;
+END;
+$$ LANGUAGE plpgsql;

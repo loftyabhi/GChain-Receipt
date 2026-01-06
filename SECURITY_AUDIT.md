@@ -60,7 +60,7 @@ This document outlines the security architecture, potential risks, and implement
 | :--- | :--- | :--- | :--- |
 | **High** | Admin Key Leakage | Open | Use Hardware Wallet for Admin; Rotate JWT Secret periodically. |
 | **Medium** | RPC Node Rate Limiting | Open | Use paid/private RPC endpoints (e.g., Alchemy/Infura) instead of public ones to avoid service disruption. |
-| **Low** | PDF Generation DoS | Mitigated | PDF generation is queued (BullMQ) and processed in strict order to preventing CPU exhaustion. |
+| **Low** | PDF Generation DoS | Mitigated | PDF generation uses a **Soft Queue** (PostgreSQL) with strict concurrency limits (`MAX_CONCURRENT_JOBS`) and feature flags to prevent resource exhaustion. |
 | **Low** | Fake "Pending" Spam | Mitigated | The `pending_contributions` table can be filled with random hashes, but the Worker validates them against the blockchain quickly, marking invalid ones as failed. Regular cleanup job recommended. |
 
 ## 6. Audit Logs

@@ -42,6 +42,8 @@ export interface BillViewModel {
     // Network
     CHAIN_NAME: string;
     CHAIN_ID: number;
+    CONTRACT_ADDRESS: string;
+    DATE: string;
     CHAIN_SYMBOL: string;
     CHAIN_ICON: string;
     HOME_URL: string;
@@ -105,9 +107,11 @@ export interface BillViewModel {
     CURRENT_YEAR: number;
     FRONTEND_URL: string;
     DISCLAIMER_URL: string;
+    CONTACT_URL: string;
 
-    // Ads
+    // Ad
     hasAd: boolean;
-    adLink: string;
     adContent: string;
+    adUrl?: string;
+    adId?: string;
 }
