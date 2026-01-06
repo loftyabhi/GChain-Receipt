@@ -95,6 +95,7 @@ export class SoftQueueService {
 
             if (!job) {
                 // Queue Empty. Stop recursion.
+                this.processingSlots--; // Release slot as we are not processing anything
                 return;
             }
 
