@@ -1,13 +1,10 @@
 ﻿import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
-import puppeteer, { Browser } from 'puppeteer';
-import { renderBillHtml } from './PdfTemplateHelper';
 import { PriceOracleService } from './PriceOracleService';
 import { transactionClassifier, ClassificationResult, ExecutionType, TransactionEnvelopeType } from './TransactionClassifier';
 import { AdminService } from './AdminService';
 import { ERC20_ABI, ERC721_ABI, ERC1155_ABI } from '../abis/Common';
-import { PDFDocument } from 'pdf-lib';
 import QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { createHash } from 'crypto';
@@ -184,45 +181,13 @@ export class BillService {
     };
 
     private alchemyCallsMade = false;
-    private browser: Browser | null = null;
 
     constructor() {
         this.oracle = new PriceOracleService();
         this.adminService = new AdminService();
     }
 
-    /**
-     * Initializes or recovers the Puppeteer browser instance.
-     * Singleton pattern to prevent spawning thousands of Chrome processes.
-     */
-    private async initBrowser() {
-        if (!this.browser || !this.browser.isConnected()) {
-            console.log('[BillService] Launching new Shared Browser Instance...');
-            this.browser = await puppeteer.launch({
-                headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-accelerated-2d-canvas',
-                    '--block-new-web-contents'
-                ]
-            });
-        }
-        return this.browser;
-    }
 
-    /**
-     * Gracefully close the shared browser (called by Worker on shutdown)
-     */
-    public async dispose() {
-        if (this.browser) {
-            console.log('[BillService] Closing Shared Browser Instance...');
-            await this.browser.close();
-            this.browser = null;
-        }
-    }
 
     /**
      * Regenerate a bill from its ID string (Self-Healing).
@@ -246,7 +211,7 @@ export class BillService {
         }
 
         // 1. Fetch Block to find full Tx Hash
-        const provider = new ethers.JsonRpcProvider(this.getRpcUrl(chainId));
+        const provider = this.getRpcProvider(chainId);
         const block = await provider.getBlock(blockNumber);
 
         if (!block) throw new Error('Block not found on chain');
@@ -277,8 +242,8 @@ export class BillService {
             // or resolve from 'from' address.
         });
 
-        // 4. Return Public Path
-        return `/bills/${cleanId}.pdf`;
+        // 4. Return Public Path (Frontend Route)
+        return `/print/bill/${cleanId}`;
     }
 
     /**
@@ -291,7 +256,7 @@ export class BillService {
         try {
             // 1. Fetch Basic Info first (Cost: 1 RPC Call) to derive the ID
             // We need Block Number to construct the standard Bill ID
-            const provider = new ethers.JsonRpcProvider(this.getRpcUrl(chainId));
+            const provider = this.getRpcProvider(chainId);
             const receipt = await provider.getTransactionReceipt(txHash);
 
             if (!receipt) throw new Error('Transaction Receipt not found');
@@ -303,7 +268,8 @@ export class BillService {
 
             const jsonKey = `${billId}.json`;
             const pdfKey = `${billId}.pdf`;
-            const publicPath = `/bills/${billId}.pdf`;
+            // CORRECTED: Point to Client-Side Print Route, not static PDF file
+            const publicPath = `/print/bill/${billId}`;
 
             console.log(`[BillService] ID Resolved: ${billId}`);
 
@@ -412,30 +378,20 @@ export class BillService {
                 forcedBillId: billId
             });
 
-            // 4. Render PDF (Returns Buffer)
-            const pdfBuffer = await this.renderPdfBuffer(billData);
+            // 4. Skip PDF Rendering (Client-Side Flow)
+            // const pdfBuffer = await this.renderPdfBuffer(billData);
 
-            // 5. Upload to Supabase (Parallel)
-            console.log(`[BillService] Uploading ${billId} to Supabase...`);
-
-            // Upload PDF
-            const pdfUpload = supabase.storage
-                .from('receipts')
-                .upload(pdfKey, pdfBuffer, {
-                    contentType: 'application/pdf',
-                    upsert: true
-                });
+            // 5. Upload to Supabase (JSON Only)
+            console.log(`[BillService] Uploading ${billId} JSON to Supabase...`);
 
             // Upload JSON (Metadata for future 0-RPC retrieval)
             const jsonBuffer = Buffer.from(JSON.stringify(billData));
-            const jsonUpload = supabase.storage
+            await supabase.storage
                 .from('receipts')
                 .upload(jsonKey, jsonBuffer, {
                     contentType: 'application/json',
                     upsert: true
                 });
-
-            await Promise.all([pdfUpload, jsonUpload]);
 
             // Save to DB (Cache)
             await this.saveToDb(txHash, chainId, userAddress, billData, receipt.status === 1);
@@ -443,8 +399,9 @@ export class BillService {
             // Trigger Cleanup (Async/Fire-and-forget)
             this.cleanupOldBills().catch(err => console.error("Cleanup failed", err));
 
-            console.log(`[BillService] Generation & Upload Complete.`);
-            return { pdfPath: publicPath, billData };
+            console.log(`[BillService] JSON Data generated and cached.`);
+            // Return Frontend URL path instead of PDF path
+            return { pdfPath: `/print/bill/${billId}`, billData };
 
         } catch (error: any) {
             console.error(`[BillService] Generation Failed: ${error.message}`);
@@ -458,7 +415,7 @@ export class BillService {
         const rpcUrl = this.getRpcUrl(chainId);
         if (!rpcUrl) throw new Error(`Unsupported Chain ID: ${chainId}`);
 
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const provider = this.getRpcProvider(chainId);
         const [tx, receipt] = await Promise.all([
             provider.getTransaction(txHash),
             provider.getTransactionReceipt(txHash)
@@ -574,6 +531,19 @@ export class BillService {
 
     // --- Valuation & Direction (Enterprise Layer) ---
 
+    private providerCache: Map<number, ethers.JsonRpcProvider> = new Map();
+
+    private getRpcProvider(chainId: number): ethers.JsonRpcProvider {
+        if (!this.providerCache.has(chainId)) {
+            const url = this.getRpcUrl(chainId);
+            // Use static network to avoid automatic network detection overhead
+            this.providerCache.set(chainId, new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true }));
+        }
+        return this.providerCache.get(chainId)!;
+    }
+
+    // --- Valuation & Direction (Enterprise Layer) ---
+
     private async applyPricingAndDirection(
         raw: RawTokenMovement[],
         userAddress: string,
@@ -583,32 +553,25 @@ export class BillService {
         timestamp: number,
         txOrigin: string
     ): Promise<PricedTokenMovement[]> {
-        const priced: PricedTokenMovement[] = [];
         const aliasAddress = classification.executionType === ExecutionType.ACCOUNT_ABSTRACTION ? txOrigin : undefined;
-
         const isRelevent = (addr: string): boolean => addr === userAddress || (aliasAddress !== undefined && addr === aliasAddress);
 
         let relevantRaw = raw.filter(m => isRelevent(m.from) || isRelevent(m.to));
 
         if (relevantRaw.length === 0) {
-            // Fallback: If no movements for User, try movements involving Tx Origin
             if (userAddress !== txOrigin) {
                 relevantRaw = raw.filter(m => m.from === txOrigin || m.to === txOrigin);
             }
         }
 
-        // Dedup Check: If still empty, maybe return all NON-spam (non-zero) movements? 
-        // For now, strict: only irrelevant if truly 0 movements.
         if (relevantRaw.length === 0 && raw.length > 0) {
-            // Last resort: Just show everything (Observer mode for unrelated tx)
             relevantRaw = raw;
         }
 
-        for (const m of relevantRaw) {
+        // Optimization: Parallelize Price Fetching
+        const pricingPromises = relevantRaw.map(async (m) => {
             let isIn = isRelevent(m.to);
             if (!isRelevent(m.from) && !isRelevent(m.to)) {
-                // If neither, assume IN if TO is closer to being 'recipient-like'? 
-                // Or just default OUT if FROM matches txOrigin.
                 if (m.from === txOrigin) isIn = false;
                 else isIn = true;
             }
@@ -632,17 +595,17 @@ export class BillService {
             const amountFmt = ethers.formatUnits(m.amount, m.decimals);
             const amountFloat = parseFloat(amountFmt);
 
-            priced.push({
+            return {
                 ...m,
                 historicPrice: histPrice,
                 currentPrice: currPrice,
                 historicValueUsd: amountFloat * histPrice,
                 currentValueUsd: amountFloat * currPrice,
                 isIn
-            });
-        }
+            };
+        });
 
-        return priced;
+        return Promise.all(pricingPromises);
     }
 
     private async calculateFees(receipt: ethers.TransactionReceipt, chainId: number, timestamp: number) {
@@ -861,111 +824,8 @@ export class BillService {
 
     // --- Render ---
 
-    private async renderPdfBuffer(data: BillViewModel): Promise<Uint8Array> {
-        // Use Shared Browser
-        const browser = await this.initBrowser();
-
-        try {
-            const html = renderBillHtml(data);
-            const pdfMargin = { top: '60px', bottom: '60px', left: '60px', right: '60px' };
-            const resetPaddingCss = `
-                .page-content { padding: 0 !important; }
-                .header { margin-top: 0 !important; } 
-            `;
-
-            // Helper to Setup Page with Strict Interception & Readiness
-            const setupPage = async (page: any) => {
-                await page.setRequestInterception(true);
-                page.on('request', (req: any) => {
-                    const resourceType = req.resourceType();
-                    // Allow data: URIs (fonts/images) and minimal local execution
-                    if (req.isInterceptResolutionHandled()) return;
-
-                    const url = req.url();
-                    if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('file:')) {
-                        req.continue();
-                    } else {
-                        // Block all external networking (fonts.googleapis, images, tracking)
-                        req.abort();
-                    }
-                });
-
-                // Fail-Fast Watchdog Race
-                const renderPromise = async () => {
-                    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    // Strict Readiness Check
-                    await page.waitForSelector('#render-complete', { timeout: 5000 });
-                    await page.addStyleTag({ content: resetPaddingCss });
-                };
-
-                const watchdog = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('RENDER_DEADLOCK: Page rendering hung (>10s)')), 10000)
-                );
-
-                await Promise.race([renderPromise(), watchdog]);
-            };
-
-            // Page 1
-            const page1 = await browser.newPage();
-            let p1Buffer: Uint8Array;
-            try {
-                await setupPage(page1);
-                p1Buffer = await page1.pdf({
-                    format: 'A4',
-                    printBackground: true,
-                    displayHeaderFooter: false,
-                    margin: pdfMargin,
-                    pageRanges: '1'
-                });
-            } finally {
-                await page1.close();
-            }
-
-            // Page 2+
-            const page2 = await browser.newPage();
-            let p2Buffer: Uint8Array;
-            try {
-                await setupPage(page2);
-                p2Buffer = await page2.pdf({
-                    format: 'A4',
-                    printBackground: true,
-                    displayHeaderFooter: true,
-                    headerTemplate: `
-                        <div style="width:100%; font-family: 'Inter', sans-serif; font-size: 9px; padding: 0 60px; color: #64748b; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; margin-bottom: 10px;">
-                            <span style="font-weight: 600; color: #0f172a;">CHAIN RECEIPT</span>
-                            <span>${data.BILL_ID} <span style="margin: 0 8px;">|</span> Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
-                        </div>
-                    `,
-                    footerTemplate: `<div style="width:100%;font-size:7px;text-align:center;color:#94a3b8;">Generated by Chain Receipt Assurance Protocols</div>`,
-                    margin: pdfMargin,
-                    pageRanges: '2-'
-                });
-            } finally {
-                await page2.close();
-            }
-
-            // --- Merge ---
-            const pdfDoc = await PDFDocument.create();
-            const p1 = await PDFDocument.load(p1Buffer);
-            const [cov] = await pdfDoc.copyPages(p1, [0]);
-            pdfDoc.addPage(cov);
-
-            try {
-                const p2 = await PDFDocument.load(p2Buffer);
-                if (p2.getPageCount() > 0) {
-                    const indices = Array.from({ length: p2.getPageCount() }, (_, i) => i);
-                    const others = await pdfDoc.copyPages(p2, indices);
-                    others.forEach(o => pdfDoc.addPage(o));
-                }
-            } catch (e) { }
-
-            return await pdfDoc.save();
-
-        } finally {
-            // DO NOT close browser here, only pages (handled above with page.close())
-            // We keep the browser warm for the next job.
-        }
-    }
+    // --- Render (REMOVED) ---
+    // private async renderPdfBuffer(data: BillViewModel): Promise<Uint8Array> { ... }
 
     // --- Helpers (Private) ---
 
@@ -1013,7 +873,9 @@ export class BillService {
     }
 
     private async resolveNames(from: string, to: string | null, chain: number) {
-        const p = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
+        // Optimization: Cache this provider too? Or is it mainnet specific?
+        // Usually resolveNames uses Mainnet.
+        const p = this.getRpcProvider(1);
         const resolve = async (a: string) => { try { return await p.lookupAddress(a); } catch { return null; } };
         return { fromName: await resolve(from), toName: to ? await resolve(to) : null };
     }
@@ -1055,8 +917,13 @@ export class BillService {
             console.warn('[BillService] Save failed. Retrying without wallet linkage...', e.code);
             try {
                 await this.performUpsert(txHash, chainId, null, data, isConfirmed);
-            } catch (retryError) {
-                console.error('[BillService] CRITICAL: Failed to save to DB cache even without wallet.', retryError);
+            } catch (retryError: any) {
+                if (retryError.code === 'P0001') {
+                    // Constraint violation: Bill already exists/immutable. This is fine.
+                    console.log('[BillService] Bill is already finalized (P0001). Skipping DB update.');
+                } else {
+                    console.error('[BillService] CRITICAL: Failed to save to DB cache even without wallet.', retryError);
+                }
             }
         }
     }

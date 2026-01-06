@@ -1,0 +1,576 @@
+/* ==================== RESET & BASE ==================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+:root {
+    /* Palette: Slate & Indigo - Professional, Trustworthy */
+    --color-bg: #ffffff;
+    --color-surface: #f8fafc;
+    --color-border: #e2e8f0;
+
+    --color-text-primary: #0f172a;
+    --color-text-secondary: #374151;
+    /* Was #64748b - Darkened */
+    --color-text-tertiary: #4b5563;
+    /* Was #94a3b8 - Darkened */
+
+    --color-accent: #7c3aed;
+    /* Violet 600 */
+    --color-accent-light: #ede9fe;
+    --color-accent-dark: #5b21b6;
+
+    --color-success: #10b981;
+    --color-success-bg: #ecfdf5;
+    --color-success-text: #065f46;
+
+    --color-danger: #ef4444;
+    --color-danger-bg: #fef2f2;
+    --color-danger-text: #991b1b;
+
+    --color-warning: #f59e0b;
+    --color-warning-bg: #fffbeb;
+    --color-warning-text: #92400e;
+
+    /* Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+
+    /* Typography */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+    /* Radius */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    /* Tighter radius for professional look */
+    --radius-lg: 8px;
+}
+
+@page {
+    size: A4;
+    margin: 20mm;
+
+    /* Browser default for A4 is usually good, but explicit is better */
+    @top-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: 'Inter', sans-serif;
+        font-size: 10px;
+        color: #64748b;
+    }
+}
+
+/* 
+ * CRITICAL: Hide the global app footer when this stylesheet is loaded.
+ * This is necessary because the RootLayout includes the footer, 
+ * but we want the print page (even in preview/screen mode) to be clean.
+ * We target common footer classes.
+ */
+body>footer,
+.footer,
+footer[class*="Footer"] {
+    display: none !important;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-text-primary);
+    font-size: 12px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+.page {
+    width: 100%;
+    min-height: 100vh;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: white;
+}
+
+.page-content {
+    flex: 1;
+}
+
+/* Helpers */
+.font-mono {
+    font-family: var(--font-mono);
+}
+
+.text-right {
+    text-align: right;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.font-bold {
+    font-weight: 700;
+}
+
+.font-medium {
+    font-weight: 500;
+}
+
+.text-secondary {
+    color: var(--color-text-secondary);
+}
+
+.text-tertiary {
+    color: var(--color-text-tertiary);
+}
+
+.text-accent {
+    color: var(--color-accent);
+}
+
+.uppercase-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+/* ==================== HEADER ==================== */
+.header {
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: var(--space-xl);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.brand-icon {
+    width: 32px;
+    height: 32px;
+    background: var(--color-text-primary);
+    color: white;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+.brand-info h1 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    line-height: 1.2;
+}
+
+.brand-tagline {
+    font-size: 10px;
+    color: var(--color-text-secondary);
+}
+
+.receipt-meta {
+    text-align: right;
+}
+
+.receipt-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+    letter-spacing: -0.02em;
+}
+
+.btn-home {
+    display: inline-block;
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    color: white;
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 8px;
+    /* Slightly rounder */
+    font-weight: 600;
+    font-size: 11px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 4px rgba(124, 58, 237, 0.2);
+}
+
+.receipt-id {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    display: inline-block;
+}
+
+/* ==================== STATUS BAR ==================== */
+.status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-xl);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.status-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: var(--radius-md);
+    /* Soft rect */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-badge.confirmed {
+    background-color: var(--color-success-bg);
+    color: var(--color-success-text);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-badge.failed {
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger-text);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.status-badge.pending {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning-text);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.chain-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.chain-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* ==================== GRID LAYOUTS ==================== */
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-xl);
+}
+
+.grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-md);
+    margin-bottom: var(--space-xl);
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* ==================== DATA POINTS ==================== */
+.data-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.data-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    word-break: break-all;
+}
+
+.data-value.mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.data-value.large {
+    font-size: 16px;
+}
+
+/* ==================== PARTICIPANTS ==================== */
+.participant-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+}
+
+.participant-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px dashed var(--color-border);
+}
+
+.avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--color-text-secondary), var(--color-text-primary));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: white;
+    font-weight: bold;
+}
+
+/* ==================== TABLES ==================== */
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.table-container {
+    margin-bottom: var(--space-xl);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+th {
+    text-align: left;
+    padding: var(--space-sm) 0;
+    border-bottom: 2px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    /* Prevent wrapping */
+}
+
+/* Right align numeric columns specifically via class or nth-child */
+th.text-right {
+    text-align: right;
+}
+
+td {
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+.token-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.direction-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+}
+
+.direction-in {
+    color: var(--color-success-text);
+    background: var(--color-success-bg);
+}
+
+.direction-out {
+    color: var(--color-danger-text);
+    background: var(--color-danger-bg);
+}
+
+.amount-positive {
+    color: var(--color-success);
+    font-weight: 600;
+}
+
+.amount-negative {
+    color: var(--color-text-primary);
+}
+
+/* ==================== FINANCIAL SUMMARY ==================== */
+.financial-summary {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--space-xl);
+}
+
+.summary-box {
+    width: 300px;
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--space-sm);
+    font-size: 12px;
+}
+
+.summary-row.total {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--color-border);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--color-text-primary);
+}
+
+/* ==================== FOOTER / AD / QR ==================== */
+.document-footer {
+    padding-top: var(--space-xl);
+    border-top: 1px solid var(--color-border);
+    /* For print layout, we want this to be at the bottom if possible, or just flow naturally */
+}
+
+.ad-container {
+    margin-bottom: var(--space-lg);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    text-align: center;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.ad-container img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+.qr-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-lg);
+}
+
+.qr-image {
+    width: 80px;
+    height: 80px;
+    border: 4px solid white;
+    box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.footer-legal {
+    font-size: 9px;
+    color: var(--color-text-tertiary);
+    text-align: center;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+/* ==================== AUDIT SECTION ==================== */
+.audit-strip {
+    margin-top: var(--space-lg);
+    padding: var(--space-md);
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    /* Prevent splitting across pages */
+    page-break-inside: avoid;
+    break-inside: avoid;
+    display: block;
+}
+
+.audit-title {
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: var(--space-md);
+    color: var(--color-text-primary);
+}
+
+/* ==================== PRINT SPECIFIC OVERRIDES ==================== */
+@media print {
+
+    /* Hide Global Navigation and Footers from layout.tsx if identifiable */
+    nav,
+    footer,
+    .footer,
+    .navbar,
+    .header-global,
+    header:not(.page-content header) {
+        display: none !important;
+    }
+
+    /* Ensure the bill header is visible */
+    .header {
+        display: flex !important;
+    }
+
+    body {
+        background: white;
+        margin: 0;
+        padding: 0;
+    }
+
+    .page {
+        border: none;
+        box-shadow: none;
+        margin: 0;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* Hide buttons like "Print" if added to the page */
+    .no-print {
+        display: none !important;
+    }
+
+    /* Force background colors */
+    body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}

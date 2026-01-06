@@ -75,7 +75,7 @@ export default function Home() {
           } else if (jobData.state === 'completed') {
             clearInterval(pollInterval);
             setBillData(jobData.data);
-            setPdfUrl(`${process.env.NEXT_PUBLIC_API_URL}${jobData.pdfUrl}`);
+            setPdfUrl(jobData.pdfUrl); // Already includes /print/bill/...
             setLoading(false);
             toast.success("Documentation compiled successfully.", { id: toastId });
           } else if (jobData.state === 'failed') {
@@ -254,11 +254,11 @@ export default function Home() {
                     <a
                       href={pdfUrl}
                       target="_blank"
-                      download={`receipt-${billData.BILL_ID}.pdf`}
+                      // download={`receipt-${billData.BILL_ID}.pdf`} // Removed download attr
                       className="w-full flex justify-center items-center gap-2 rounded-xl bg-violet-600 px-6 py-4 font-bold text-white transition-all hover:bg-violet-500 hover:shadow-lg hover:shadow-violet-600/20 active:translate-y-0.5"
                     >
                       <FileText size={20} />
-                      Download PDF Receipt
+                      Print / Save as PDF
                     </a>
                   </div>
                 </div>
@@ -271,7 +271,7 @@ export default function Home() {
                       <span className="font-medium text-sm">Loading Preview...</span>
                     </div>
                   </div>
-                  <iframe src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0`} className="relative z-10 w-full h-full" />
+                  <iframe src={`${pdfUrl}?mode=preview`} className="relative z-10 w-full h-full" />
                 </div>
               </div>
             </motion.div>

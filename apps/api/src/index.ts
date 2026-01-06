@@ -70,6 +70,54 @@ app.get('/bills/:fileName', async (req: Request, res: Response) => {
     }
 });
 
+// New Endpoint: Get Bill JSON Data (For Client-Side Rendering)
+app.get('/api/v1/bills/:billId/data', async (req: Request, res: Response) => {
+    const { billId } = req.params;
+    // Append .json if not present, though usually ID implies base name.
+    // The ID format is BILL-...
+    // Storage keys are BILL-....json
+    const jsonKey = billId.endsWith('.json') ? billId : `${billId}.json`;
+
+    try {
+        // 1. Try fetching from Supabase Storage directly
+        const { data, error } = await supabase.storage
+            .from('receipts')
+            .download(jsonKey);
+
+        if (data) {
+            const text = await data.text();
+            res.json(JSON.parse(text));
+            return;
+        }
+
+        // 2. If missing, try regeneration (Self-Healing)
+        console.log(`[API] JSON ${jsonKey} missing. Triggering self-healing...`);
+        try {
+            // regenerateFromId returns the PDF path, but it generates the JSON as side effect
+            await billService.regenerateFromId(jsonKey.replace('.json', ''));
+
+            // Try downloading again
+            const { data: retryData } = await supabase.storage
+                .from('receipts')
+                .download(jsonKey);
+
+            if (retryData) {
+                const text = await retryData.text();
+                res.json(JSON.parse(text));
+                return;
+            }
+        } catch (regenError: any) {
+            console.error(`[API] Self-healing failed: ${regenError.message}`);
+        }
+
+        res.status(404).json({ error: 'Bill data not found' });
+
+    } catch (error) {
+        console.error('[API] Error fetching bill data:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 // Services - Initialized above
 // const authService = new AuthService();
 // const adminService = new AdminService();
@@ -152,7 +200,10 @@ app.get('/api/v1/bills/job/:id', async (req: Request, res: Response, next: NextF
             id: job.id,
             state, // completed, failed, active, waiting
             data: result ? result.billData : null,
-            pdfUrl: result ? result.pdfPath : null,
+            // Robustness: Use BILL_ID from data if available to construct new route, fallback to path
+            pdfUrl: (result && result.billData && result.billData.BILL_ID)
+                ? `/print/bill/${result.billData.BILL_ID}`
+                : (result ? result.pdfPath : null),
             error: failedReason,
             queuePosition,
             estimatedWaitMs

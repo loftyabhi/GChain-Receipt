@@ -127,7 +127,7 @@ billWorker.on('active', (job) => {
  */
 export const closeBillWorker = async () => {
     console.log('[Worker] Initiating graceful shutdown...');
-    await billService.dispose();
+    // await billService.dispose(); // Method removed
     await billWorker.close();
     console.log('[Worker] All jobs completed, worker closed');
 };
