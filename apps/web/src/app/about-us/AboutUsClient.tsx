@@ -62,7 +62,7 @@ export default function AboutUsClient() {
                             </div>
                             <h2 className="text-2xl font-bold text-white mb-4">Our Mission</h2>
                             <p className="text-zinc-400 leading-relaxed">
-                                To standardize blockchain record-keeping. We aim to ease the burden of compliance for retail users and businesses alike by providing audit-grade documentation for every on-chain event.
+                                To support Web3 compliance workflows. We aim to ease the burden of compliance for retail users and businesses alike by providing audit-ready documentation for every on-chain event.
                             </p>
                         </div>
                     </motion.div>
@@ -101,7 +101,7 @@ export default function AboutUsClient() {
                         {[
                             { icon: Receipt, title: "Instant Receipts", desc: "Generate PDF receipts for any transaction hash instantly.", color: "text-violet-400", bg: "bg-violet-500/10" },
                             { icon: FileText, title: "Detailed History", desc: "Track your entire transaction history with ease.", color: "text-pink-400", bg: "bg-pink-500/10" },
-                            { icon: ShieldCheck, title: "Verifiable Data", desc: "All data is fetched directly from the blockchain for 100% accuracy.", color: "text-blue-400", bg: "bg-blue-500/10" },
+                            { icon: ShieldCheck, title: "Verifiable Data", desc: "All data is fetched from public blockchain sources and interpreted deterministically.", color: "text-blue-400", bg: "bg-blue-500/10" },
                             { icon: Zap, title: "Multi-Chain Support", desc: "Support for Ethereum, Polygon, BSC, and more.", color: "text-amber-400", bg: "bg-amber-500/10" }
                         ].map((item, i) => (
                             <motion.div

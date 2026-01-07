@@ -1,7 +1,7 @@
 import { MetadataRoute } from 'next';
 
 export default function robots(): MetadataRoute.Robots {
-    const baseUrl = 'https://chainreceipt.com'; // Replace with actual domain
+    const baseUrl = 'https://chainreceipt.vercel.app'; // Replace with actual domain
 
     return {
         rules: {

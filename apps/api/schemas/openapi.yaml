@@ -14,6 +14,7 @@ info:
     - **Strategy**: Semantic Versioning (SemVer). Breaking changes increment the major version path `/api/v2`.
     - **Deprecation**: Deprecated endpoints return `Deprecation` (boolean/date) and `Link` details headers (RFC 8594).
     - **Sunset**: Removed endpoints return `Sunset` header indicating removal date.
+      Example: `Sunset: Wed, 01 Jan 2026 00:00:00 GMT`
 
     ## Observability
     - **Tracing**: Clients *must* propgate `X-Trace-ID` for distributed tracing.
@@ -117,6 +118,12 @@ components:
         errorCode:
           type: string
           description: Stable machine-readable error code (e.g., `VALIDATION_ERROR`).
+          # Standard codes:
+          # - RATE_LIMIT_EXCEEDED
+          # - INVALID_TX_HASH
+          # - UNSUPPORTED_TRANSACTION
+          # - NETWORK_UNAVAILABLE
+          # - INTERNAL_ERROR
           example: RATE_LIMIT_EXCEEDED
         message:
           type: string
@@ -359,10 +366,15 @@ paths:
                   type: integer
                 connectedWallet:
                   type: string
+                  description: Optional. Used for contextual interpretation only. Never stored or associated with identity.
       responses:
         '200':
           description: Request Queued.
           headers:
+             Cache-Control:
+               schema:
+                 type: string
+               example: no-store
              X-RateLimit-Limit:
                $ref: '#/components/headers/RateLimitLimit'
              X-RateLimit-Remaining:
@@ -397,7 +409,7 @@ paths:
       summary: Get Bill Job Status
       description: |
         Retrieves the status of a bill resolution job.
-        Clients should poll this endpoint with exponential backoff.
+        Clients should apply exponential backoff when receiving 429 responses.
       security: [] # Public status check
       tags:
         - Bills
@@ -413,6 +425,10 @@ paths:
         '200':
           description: Job Status and Result.
           headers:
+            Cache-Control:
+               schema:
+                 type: string
+               example: no-store
             X-Trace-ID:
                $ref: '#/components/headers/TraceId'
           content:

@@ -18,6 +18,16 @@ export function GoogleAnalytics() {
                     __html: `
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
+            
+            // 1. Consent Mode v2 Defaults (MUST be called before config)
+            gtag('consent', 'default', {
+              'ad_storage': 'denied',
+              'analytics_storage': 'denied',
+              'ad_user_data': 'denied',
+              'ad_personalization': 'denied',
+              'wait_for_update': 500
+            });
+
             gtag('js', new Date());
 
             // Sanitize URL (never send tx hashes)

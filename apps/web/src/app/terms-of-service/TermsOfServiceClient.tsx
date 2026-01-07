@@ -14,7 +14,7 @@ export default function TermsOfServiceClient() {
                 <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-600/5 blur-[120px]" />
             </div>
 
-            <div className="relative z-10 mx-auto max-w-4xl px-6 py-24">
+            <div className="relative z-10 mx-auto max-w-7xl px-6 py-24">
 
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}

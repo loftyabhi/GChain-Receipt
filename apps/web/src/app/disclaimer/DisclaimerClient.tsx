@@ -25,7 +25,7 @@ export default function DisclaimerClient() {
         {
             title: "Blockchain Data",
             icon: <Info className="text-emerald-400" size={24} />,
-            content: "Chain Receipt relies on public blockchain data and third-party APIs to generate receipts. While we strive for accuracy, we cannot guarantee the completeness or correctness of the data fetched from these external sources. Always verify transaction details on a block explorer."
+            content: "Chain Receipt relies on public blockchain data and third-party APIs to generate receipts. While we strive for accuracy, we cannot guarantee the completeness or correctness of the data fetched from these external sources. Always verify transaction details on a block explorer. Generated reports are interpretive summaries, not authoritative blockchain records."
         },
         {
             title: "Limitation of Liability",
@@ -44,7 +44,7 @@ export default function DisclaimerClient() {
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-blue-600/5 blur-[120px]" />
             </div>
 
-            <div className="relative z-10 mx-auto max-w-4xl px-6 py-24">
+            <div className="relative z-10 mx-auto max-w-7xl px-6 py-24">
 
                 {/* Header */}
                 <motion.div

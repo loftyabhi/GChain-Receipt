@@ -1,13 +1,20 @@
 import { MetadataRoute } from 'next';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-    const baseUrl = 'https://chainreceipt.com'; // Replace with actual domain
+    const baseUrl = 'https://chainreceipt.vercel.app'; // Replace with actual domain
 
     // core pages
     const routes = [
         '',
         '/how-to-read-blockchain-transaction',
         '/transaction-intelligence',
+        '/features',
+        '/about-us',
+        '/contact-us',
+        '/support',
+        '/privacy-policy',
+        '/terms-of-service',
+        '/disclaimer',
     ].map((route) => ({
         url: `${baseUrl}${route}`,
         lastModified: new Date(),

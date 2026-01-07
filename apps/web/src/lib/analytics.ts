@@ -24,6 +24,11 @@ export const GA_MEASUREMENT_ID = 'G-YTN902WXJS';
 // Privacy-safe event tracking
 export const trackEvent = (action: EventType, params: AnalyticsEventProps) => {
     if (typeof window !== 'undefined' && (window as any).gtag) {
+        // STRICT PRIVACY: Do not fire events unless consent is explicitly granted
+        // This ensures zero telemetry for users who have not accepted or have declined.
+        const consent = localStorage.getItem('cookie_consent');
+        if (consent !== 'granted') return;
+
         // SECURITY: Ensure NO raw hashes or addresses are passed
         const safeParams = { ...params };
 

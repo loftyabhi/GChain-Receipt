@@ -18,12 +18,7 @@ const FEATURES_SUPPORTED = [
     { icon: <Heart size={24} />, title: 'Open Source', desc: 'Community-driven development and transparent code.' },
 ];
 
-const ROADMAP_ITEMS = [
-    { status: 'Live', title: 'PDF Receipt Generation', desc: 'Instant audit-ready receipts for any transaction.' },
-    { status: 'In Progress', title: 'Enterprise Dashboard', desc: 'Bulk export and team management features.' },
-    { status: 'Planned', title: 'Tax Tool Integrations', desc: 'Direct sync with Quickbooks and Xero.' },
-    { status: 'Planned', title: 'DAO Governance', desc: 'Community voting on future features.' },
-];
+
 
 // --- Types & Config ---
 type Token = {
@@ -417,7 +412,7 @@ export default function SupportClient() {
                                 </div>
                                 <div className="flex flex-col">
                                     <span className="text-sm font-bold text-white">Contribute Anonymously</span>
-                                    <span className="text-xs text-zinc-500">Your address will be hidden from the public leaderboard.</span>
+                                    <span className="text-xs text-zinc-500">Anonymous means hidden from this site’s leaderboard. Blockchain transactions remain public.</span>
                                 </div>
                             </div>
 
@@ -540,28 +535,7 @@ export default function SupportClient() {
                         </div>
                     </div>
 
-                    {/* E. Future Plans */}
-                    <div className="max-w-4xl mx-auto">
-                        <h2 className="text-3xl font-bold text-white mb-12 text-center">Roadmap</h2>
-                        <div className="grid gap-4">
-                            {ROADMAP_ITEMS.map((item, idx) => (
-                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-6 p-6 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors">
-                                    <div className="min-w-[120px]">
-                                        <span className={`inline-flex items-center justify-center w-full px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide ${item.status === 'Live' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
-                                            item.status === 'In Progress' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                                                'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
-                                            }`}>
-                                            {item.status}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-white text-lg mb-1">{item.title}</h4>
-                                        <p className="text-zinc-400">{item.desc}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+
 
                     {/* Legal Disclaimer */}
                     <div className="max-w-2xl mx-auto text-center pt-24 pb-12">

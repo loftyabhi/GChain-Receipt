@@ -62,6 +62,18 @@ export class Decoder {
         }
     }
 
+    static decodeERC1155Transfer(log: Log) {
+        try {
+            // Try generic parsing which handles both TransferSingle and TransferBatch if ABI knows both
+            return this.erc1155Interface.parseLog({
+                topics: log.topics,
+                data: log.data,
+            });
+        } catch {
+            return null;
+        }
+    }
+
     static decodeERC1155TransferBatch(log: Log) {
         try {
             return this.erc1155Interface.parseLog({

@@ -1,14 +1,23 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { Footer } from '@/components/Footer';
 import { GoogleAnalytics } from '@/components/analytics/GoogleAnalytics';
+import { ConsentBanner } from '@/components/analytics/ConsentBanner';
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jetbrains-mono',
+});
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://chainreceipt.com'),
+  metadataBase: new URL('https://chainreceipt.vercel.app'),
   title: {
     default: 'Chain Receipt | Professional Blockchain Intelligence',
     template: '%s | Chain Receipt',
@@ -37,10 +46,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <GoogleAnalytics />
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+      <body className="bg-[#0a0a0a] min-h-screen text-white antialiased selection:bg-violet-500/30 font-sans">
         <Providers>
+          <GoogleAnalytics />
+          <ConsentBanner />
           {children}
           <Footer />
         </Providers>

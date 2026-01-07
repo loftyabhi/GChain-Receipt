@@ -9,34 +9,32 @@ interface SendEmailParams {
     displayFrom?: string;
 }
 
-// Singleton transporter pattern for Next.js to avoid multiple connections in dev
+// Singleton transporter pattern for Next.js (Lazy Initialized)
 const getTransporter = () => {
+    // Check inside function, not at top level
     if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
-        throw new Error('Missing GMAIL_USER or GMAIL_PASS environment variables');
+        return null;
     }
 
-    return nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: process.env.GMAIL_USER,
-            pass: process.env.GMAIL_PASS,
-        },
-        // Enterprise: Conservative timeouts to prevent hanging connections
-        connectionTimeout: 10000, // 10 seconds
-        greetingTimeout: 5000,    // 5 seconds
-        socketTimeout: 10000,     // 10 seconds
-    });
+    if (!global._nodemailerTransport) {
+        global._nodemailerTransport = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.GMAIL_USER,
+                pass: process.env.GMAIL_PASS,
+            },
+            // Enterprise: Conservative timeouts to prevent hanging connections
+            connectionTimeout: 10000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
+        });
+    }
+    return global._nodemailerTransport;
 };
 
-// Global reference for development
+// Global reference for development (type only)
 declare global {
     var _nodemailerTransport: nodemailer.Transporter | undefined;
-}
-
-const transporter = global._nodemailerTransport || getTransporter();
-
-if (process.env.NODE_ENV === 'development') {
-    global._nodemailerTransport = transporter;
 }
 
 export async function sendEmail({ to, replyTo, subject, text, html, displayFrom }: SendEmailParams) {
@@ -55,6 +53,9 @@ export async function sendEmail({ to, replyTo, subject, text, html, displayFrom 
         : process.env.GMAIL_USER;
 
     try {
+        const transporter = getTransporter();
+        if (!transporter) throw new Error('Transporter init failed');
+
         await transporter.sendMail({
             from,
             to,
