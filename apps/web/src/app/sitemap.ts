@@ -1,9 +1,12 @@
 import { MetadataRoute } from 'next';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-    const baseUrl = 'https://chainreceipt.vercel.app'; // Replace with actual domain
+    const baseUrl = 'https://chainreceipt.vercel.app';
 
     // core pages
+    // Priority map
+    const legalPages = ['/privacy-policy', '/terms-of-service', '/disclaimer'];
+
     const routes = [
         '',
         '/how-to-read-blockchain-transaction',
@@ -12,15 +15,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
         '/about-us',
         '/contact-us',
         '/support',
-        '/privacy-policy',
-        '/terms-of-service',
-        '/disclaimer',
-    ].map((route) => ({
-        url: `${baseUrl}${route}`,
-        lastModified: new Date(),
-        changeFrequency: 'weekly' as const,
-        priority: route === '' ? 1 : 0.8,
-    }));
+        ...legalPages,
+    ].map((route) => {
+        let priority = 0.8;
+        if (route === '') priority = 1;
+        else if (legalPages.includes(route)) priority = 0.6;
+
+        return {
+            url: `${baseUrl}${route}`,
+            lastModified: new Date().toISOString(),
+            changeFrequency: 'weekly' as const,
+            priority,
+        };
+    });
 
     return routes;
 }

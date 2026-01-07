@@ -1,13 +1,13 @@
 import { MetadataRoute } from 'next';
 
 export default function robots(): MetadataRoute.Robots {
-    const baseUrl = 'https://chainreceipt.vercel.app'; // Replace with actual domain
+    const baseUrl = 'https://chainreceipt.vercel.app';
 
     return {
         rules: {
             userAgent: '*',
-            allow: ['/', '/tx/'],
-            disallow: ['/api/', '/print/', '/_next/'],
+            allow: '/',
+            disallow: ['/api/', '/print/', '/_next/', '/dashboard/', '/admin/', '/internal/'],
         },
         sitemap: `${baseUrl}/sitemap.xml`,
     };
