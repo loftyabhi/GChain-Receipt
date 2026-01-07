@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Suspense } from 'react';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { Footer } from '@/components/Footer';
@@ -19,6 +20,9 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://chainreceipt.vercel.app'),
+  verification: {
+    google: 'qqKLsD62JCrHlaIcPeLmWB3jUJIZ1GiMY5-N1bN-cOM',
+  },
   title: {
     default: 'Chain Receipt | Professional Blockchain Intelligence',
     template: '%s | Chain Receipt',
@@ -71,7 +75,9 @@ export default function RootLayout({
         <Providers>
           <GoogleAnalytics />
           <ConsentBanner />
-          <ShareAttribution />
+          <Suspense fallback={null}>
+            <ShareAttribution />
+          </Suspense>
           {children}
           <Footer />
         </Providers>

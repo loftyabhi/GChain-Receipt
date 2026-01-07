@@ -24,10 +24,23 @@ interface AnalyticsEventProps {
 
 export const GA_MEASUREMENT_ID = 'G-YTN902WXJS';
 
+// Strict admin/internal route definitions
+const ADMIN_ROUTES = ['/dashboard', '/admin', '/internal'];
+
+const isAdminRoute = () => {
+    if (typeof window === 'undefined') return false;
+    const path = window.location.pathname.toLowerCase();
+    return ADMIN_ROUTES.some(route => path === route || path.startsWith(`${route}/`));
+};
+
 // Privacy-safe event tracking
 export const trackEvent = (action: EventType, params: AnalyticsEventProps) => {
     if (typeof window !== 'undefined' && (window as any).gtag) {
-        // STRICT PRIVACY: Do not fire events unless consent is explicitly granted
+        // 1. CRITICAL: Security & Privacy Guard
+        // Immediately block ANY tracking on admin/internal routes.
+        if (isAdminRoute()) return;
+
+        // 2. STRICT PRIVACY: Do not fire events unless consent is explicitly granted
         // This ensures zero telemetry for users who have not accepted or have declined.
         const consent = localStorage.getItem('cookie_consent');
         if (consent !== 'granted') return;
