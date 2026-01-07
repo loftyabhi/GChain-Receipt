@@ -233,6 +233,9 @@ const verifyAdmin = (req: Request, res: Response, next: NextFunction) => {
 app.get('/api/v1/ads/random', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const placement = (req.query.placement as 'web' | 'pdf') || 'web';
+        // Prevent caching to ensure random distribution (Equal Proportion)
+        res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
+        res.set('Pragma', 'no-cache');
         res.json(await adminService.getRandomAd(placement));
     } catch (e) { next(e); }
 });

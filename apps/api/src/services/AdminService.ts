@@ -73,7 +73,11 @@ export class AdminService {
     }
 
     async saveAd(ad: Ad): Promise<Ad> {
-        const dbAd: any = {
+        const MAX_INT = 2147483647;
+        const inputId = Number(ad.id);
+        const isUpdate = ad.id && !isNaN(inputId) && inputId <= MAX_INT;
+
+        const payload: any = {
             name: ad.name || null,
             html_content: ad.contentHtml,
             click_url: ad.clickUrl || '',
@@ -81,19 +85,29 @@ export class AdminService {
             placement: ad.placement || 'both'
         };
 
-        const MAX_INT = 2147483647;
-        const idVal = Number(ad.id);
+        let result;
 
-        // Handle valid DB IDs (Integers). Ignore large temp IDs (timestamps) from frontend.
-        if (ad.id && !isNaN(idVal) && idVal <= MAX_INT) {
-            dbAd.id = idVal;
+        if (isUpdate) {
+            // UPDATE / UPSERT (Explicit ID)
+            payload.id = inputId;
+            // We use upsert to ensure it creates if missing (though unlikely with ID)
+            // or updates if existing.
+            result = await supabase
+                .from('ad_profiles')
+                .upsert(payload)
+                .select()
+                .single();
+        } else {
+            // CREATE (New Ad, Ignore Timestamp ID)
+            // We explicitly use INSERT to let the DB handle auto-increment
+            result = await supabase
+                .from('ad_profiles')
+                .insert(payload)
+                .select()
+                .single();
         }
 
-        const { data, error } = await supabase
-            .from('ad_profiles')
-            .upsert(dbAd)
-            .select()
-            .single();
+        const { data, error } = result;
 
         if (error) {
             console.error('[AdminService] saveAd error:', error);

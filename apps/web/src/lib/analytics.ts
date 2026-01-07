@@ -6,7 +6,8 @@ type EventType =
     | 'confidence_level_viewed'
     | 'secondary_actions_expanded'
     | 'risk_warning_viewed'
-    | 'chain_selected';
+    | 'chain_selected'
+    | 'page_shared_visit';
 
 type ConfidenceLevel = 'Confirmed' | 'High' | 'Likely' | 'Complex';
 
@@ -16,6 +17,8 @@ interface AnalyticsEventProps {
     primary_action_type?: string;
     execution_type?: string;
     error_type?: string;
+    share_source?: string;
+    entry_type?: string;
     [key: string]: any;
 }
 
@@ -34,6 +37,11 @@ export const trackEvent = (action: EventType, params: AnalyticsEventProps) => {
 
         // Explicitly delete anything that looks like a hash or address if it accidentally slipped in
         Object.keys(safeParams).forEach(key => {
+            if (safeParams[key] === undefined || safeParams[key] === null) {
+                delete safeParams[key];
+                return;
+            }
+
             const val = String(safeParams[key]);
             if (val.startsWith('0x') && val.length > 10) {
                 delete safeParams[key];
