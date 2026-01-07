@@ -1,34 +1,63 @@
 // src/services/classifier/infrastructure/ProxyResolver.ts
-import { Address } from '../core/types';
-import { ethers } from 'ethers';
+import { Address, Receipt, Log } from '../core/types';
 
-// Standard Proxy Function Selectors
-// implementation(): 0x5c60da1b
-// upgradesTo(address): 0x
-// masterCopy(): 0xa619486e
-
-const PROXY_SLOTS = {
-    // EIP-1967: keccak256('eip1967.proxy.implementation') - 1
-    IMPLEMENTATION: '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc',
-
-    // EIP-1967: keccak256('eip1967.proxy.beacon') - 1
-    BEACON: '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50',
-
-    // EIP-1822: keccak256("PROXIABLE")
-    PROXIABLE: '0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7',
+// Standard Proxy Signals
+const PROXY_TOPICS = {
+    // EIP-1967 Upgraded(address implementation)
+    UPGRADED: '0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b',
+    // BeaconUpgraded(address beacon)
+    BEACON_UPGRADED: '0x1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e',
 };
 
 export class ProxyResolver {
     /**
-     * Resolves proxy implementations.
-     * Note: In a real environment this would need an RPC provider.
-     * For this context, we will use heuristics or cached values.
-     * If RPC access was available we would `eth_getStorageAt`.
+     * Resolves proxy implementations using Event Heuristics.
+     * (Strict offline mode - no RPC calls)
      */
-    static async resolve(address: Address, provider?: any): Promise<Address | null> {
-        // Placeholder for proxy resolution logic.
-        // In a strictly offline classification engine, this often relies on
-        // a pre-indexed map or traces if available.
+    static resolve(to: Address, receipt: Receipt): Address | null {
+        if (!to) return null;
+
+        const normalizedTo = to.toLowerCase();
+
+        // 1. Check EIP-1967 'Upgraded' Event
+        // Emitted by: Transparent Proxy, UUPS, Beacon Proxy
+        const upgradedLog = receipt.logs.find(l =>
+            l.address.toLowerCase() === normalizedTo &&
+            l.topics[0] === PROXY_TOPICS.UPGRADED
+        );
+
+        if (upgradedLog && upgradedLog.topics.length > 1) {
+            // Topic 1 is the implementation address
+            return this.normalizeAddress(upgradedLog.topics[1]);
+        }
+
+        // 2. Check BeaconUpgraded Event
+        const beaconLog = receipt.logs.find(l =>
+            l.address.toLowerCase() === normalizedTo &&
+            l.topics[0] === PROXY_TOPICS.BEACON_UPGRADED
+        );
+
+        if (beaconLog && beaconLog.topics.length > 1) {
+            // For Beacon proxies, the event gives the beacon address, not implementation usually?
+            // EIP-1967: BeaconUpgraded(address indexed beacon)
+            // We return the beacon address as "resolved target" in this case, 
+            // or ideally we need the implementation the beacon points to. 
+            // Without RPC, we might just track the Beacon itself as the "logic master".
+            return this.normalizeAddress(beaconLog.topics[1]);
+        }
+
+        // 3. EIP-1167 Minimal Proxy?
+        // Cannot detect without bytecode or creation code scanning.
+        // We skip simple minimal proxies here as we have no visual/RPC confirmation.
+
+        // 4. Fallback: Check if we have logs from OTHER addresses that might be the delegate?
+        // (Hard to prove without traces).
+
         return null;
+    }
+
+    private static normalizeAddress(topic: string): Address {
+        // Topics are 32 bytes, address is last 20 bytes
+        return '0x' + topic.slice(-40).toLowerCase();
     }
 }

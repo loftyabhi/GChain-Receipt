@@ -8,6 +8,8 @@ export interface RuleResult {
     breakdown: ConfidenceBreakdown;
     protocol?: string; // Name of the detected protocol
     reasons: string[];
+    secondary?: boolean;
+    evidence?: string[];
 }
 
 export interface ClassificationRule {

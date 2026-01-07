@@ -90,13 +90,18 @@ export function Footer() {
                         <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-6">Product</h4>
                         <ul className="space-y-3">
                             <li>
-                                <Link href="/" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
-                                    Home
+                                <Link href="/transaction-intelligence" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                    Transaction Intelligence
                                 </Link>
                             </li>
                             <li>
                                 <Link href="/features" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
                                     Features
+                                </Link>
+                            </li>
+                            <li>
+                                <Link href="/how-to-read-blockchain-transaction" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                    How to Read Transactions
                                 </Link>
                             </li>
                             <li>

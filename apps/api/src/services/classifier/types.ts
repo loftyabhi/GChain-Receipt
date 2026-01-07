@@ -115,6 +115,7 @@ export enum TransactionType {
     CONTRACT_DEPLOYMENT = 'contract_deployment',
     CONTRACT_INTERACTION = 'contract_interaction',
     NATIVE_TRANSFER = 'native_transfer',
+    UNCLASSIFIED_COMPLEX = 'unclassified_complex',
     UNKNOWN = 'unknown',
 }
 
@@ -165,6 +166,7 @@ export interface ClassificationResult {
     // For backward compatibility (optional)
     type?: TransactionType;
     protocol?: string;
+    secondary?: ClassificationResult[];
 }
 
 // ==================== RESOLVER INTERFACES ====================

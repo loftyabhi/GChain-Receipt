@@ -7,6 +7,7 @@ import { useAccount } from 'wagmi';
 import { motion } from 'framer-motion';
 import AdBanner from '../components/AdBanner';
 import { toast } from 'sonner';
+import { trackTxLookup, trackEvent } from '@/lib/analytics';
 
 export default function Home() {
   const { address, isConnected } = useAccount();
@@ -31,6 +32,7 @@ export default function Home() {
     setPdfUrl('');
 
     const toastId = toast.loading("Initializing secure documentation compilation...");
+    trackTxLookup(chainId.toString(), 'started');
 
     try {
       // 1. Initiate Job
@@ -76,13 +78,14 @@ export default function Home() {
             toast.loading("Processing transaction data...", { id: toastId });
           } else if (jobData.state === 'completed') {
             clearInterval(pollInterval);
-            setBillData(jobData.data);
             setPdfUrl(jobData.pdfUrl); // Already includes /print/bill/...
             setLoading(false);
+            trackTxLookup(chainId.toString(), 'success');
             toast.success("Documentation compiled successfully.", { id: toastId });
           } else if (jobData.state === 'failed') {
             clearInterval(pollInterval);
             setLoading(false);
+            trackTxLookup(chainId.toString(), 'failed', jobData.error);
             toast.error(jobData.error || 'Generation Interrupted', { id: toastId });
           }
           // else: active/processing, keep polling
@@ -95,8 +98,14 @@ export default function Home() {
 
     } catch (err: any) {
       setLoading(false);
+      trackTxLookup(chainId.toString(), 'failed', err.message);
       toast.error(err.message, { id: toastId });
     }
+  };
+
+  const handleChainChange = (newChainId: number) => {
+    setChainId(newChainId);
+    trackEvent('chain_selected', { chain: newChainId.toString() });
   };
 
   return (
@@ -153,7 +162,7 @@ export default function Home() {
               <div className="pl-4 pr-2 border-r border-white/10 hidden md:block">
                 <select
                   value={chainId}
-                  onChange={(e) => setChainId(Number(e.target.value))}
+                  onChange={(e) => handleChainChange(Number(e.target.value))}
                   className="bg-transparent text-white outline-none border-none font-medium cursor-pointer appearance-none text-sm uppercase tracking-wide [&>option]:bg-zinc-900"
                 >
                   <option value={8453}>Base</option>
@@ -192,7 +201,7 @@ export default function Home() {
             <div className="mt-4 md:hidden flex justify-center">
               <select
                 value={chainId}
-                onChange={(e) => setChainId(Number(e.target.value))}
+                onChange={(e) => handleChainChange(Number(e.target.value))}
                 className="bg-white/5 text-white outline-none border border-white/10 rounded-lg px-4 py-2 font-medium cursor-pointer text-sm uppercase tracking-wide [&>option]:bg-zinc-900"
               >
                 <option value={8453}>Base</option>

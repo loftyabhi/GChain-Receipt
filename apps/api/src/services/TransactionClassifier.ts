@@ -1,13 +1,12 @@
-// src/services/TransactionClassifier.ts
-import { ClassificationEngine, ClassificationResult } from './classifier';
-import { TransactionType, ExecutionType, TransactionEnvelopeType } from './classifier/types';
+import { ClassificationEngine } from './classifier/core/Engine';
+import { TransactionType, ExecutionType, ClassificationResult, TransactionEnvelopeType } from './classifier/core/types';
 
 // Re-export types for consumers
 export { TransactionType, ExecutionType, TransactionEnvelopeType, ClassificationResult };
 
 const engine = new ClassificationEngine();
 
-class TransactionClassifierService {
+export class TransactionClassifierService {
     /**
      * Main classification method
      */
@@ -16,13 +15,34 @@ class TransactionClassifierService {
         transaction: any,
         chainId: number,
     ): Promise<ClassificationResult> {
-        // Adapt input to strict types if necessary (casting generic input)
-        // The engine expects strict interfaces.
+        // 1. Safety & Orchestration: Explicit Engine Call
+        // We pass chainId and txHash (via transaction object) to ensure cache correctness logic in Engine triggers correctly.
+        const result = await engine.classify(transaction, receipt, chainId);
 
-        // We might need to normalization here if the input 'transaction' from the user is raw RPC result with explicit hex vs numbers.
-        // The Engine types use strings for BigInts mostly.
+        // 2. Final Output Guards
+        // If Engine returned UNCLASSIFIED_COMPLEX, propagate immediately.
+        if (result.functionalType === TransactionType.UNCLASSIFIED_COMPLEX) {
+            return result;
+        }
 
-        return engine.classify(transaction, receipt, chainId);
+        // If primary confidence is below threshold (0.55), force UNCLASSIFIED_COMPLEX
+        // This acts as a final safety net downstream of the Engine.
+        if (result.confidence.score < 0.55) {
+            // Preserve secondary results if they exist (verbatim)
+            return {
+                ...result,
+                functionalType: TransactionType.UNCLASSIFIED_COMPLEX,
+                protocol: undefined, // Clear protocol if low confidence
+                confidence: {
+                    ...result.confidence,
+                    reasons: ['Low confidence fallback (Classifier Guard)', ...result.confidence.reasons]
+                }
+            };
+        }
+
+        // 3. Return accepted result verbatim
+        // (No re-ranking, no re-computation)
+        return result;
     }
 
     /**
@@ -58,12 +78,14 @@ class TransactionClassifierService {
             [TransactionType.NATIVE_TRANSFER]: 'Native Transfer',
             [TransactionType.BULK_TRANSFER]: 'Bulk Transfer',
             [TransactionType.GOVERNANCE_VOTE]: 'Governance Vote',
-            [TransactionType.GOVERNANCE_PROPOSE]: 'Create Proposal',
-            [TransactionType.GOVERNANCE_DELEGATE]: 'Delegate Votes',
+            [TransactionType.GOVERNANCE_PROPOSAL]: 'Create Proposal',
+            [TransactionType.GOVERNANCE_DELEGATION]: 'Delegate Votes',
+            [TransactionType.GOVERNANCE_EXECUTION]: 'Execute Proposal',
             [TransactionType.L2_DEPOSIT]: 'L2 Deposit',
             [TransactionType.L2_WITHDRAWAL]: 'L2 Withdrawal',
             [TransactionType.L2_PROVE_WITHDRAWAL]: 'Prove L2 Withdrawal',
             [TransactionType.L2_FINALIZE_WITHDRAWAL]: 'Finalize L2 Withdrawal',
+            [TransactionType.UNCLASSIFIED_COMPLEX]: 'Complex Transaction',
             [TransactionType.UNKNOWN]: 'Unknown Transaction',
         };
 
@@ -103,12 +125,14 @@ class TransactionClassifierService {
             [TransactionType.NATIVE_TRANSFER]: '↔',
             [TransactionType.BULK_TRANSFER]: '≡',
             [TransactionType.GOVERNANCE_VOTE]: '✓',
-            [TransactionType.GOVERNANCE_PROPOSE]: '≡',
-            [TransactionType.GOVERNANCE_DELEGATE]: '→',
+            [TransactionType.GOVERNANCE_PROPOSAL]: '≡',
+            [TransactionType.GOVERNANCE_DELEGATION]: '→',
+            [TransactionType.GOVERNANCE_EXECUTION]: '!',
             [TransactionType.L2_DEPOSIT]: '↓',
             [TransactionType.L2_WITHDRAWAL]: '↑',
             [TransactionType.L2_PROVE_WITHDRAWAL]: '?',
             [TransactionType.L2_FINALIZE_WITHDRAWAL]: '✓',
+            [TransactionType.UNCLASSIFIED_COMPLEX]: '?',
             [TransactionType.UNKNOWN]: '?',
         };
 

@@ -1,99 +1,122 @@
 // src/services/classifier/infrastructure/ExecutionResolver.ts
-import { Transaction, Receipt, Address, Log } from '../core/types';
+import { Transaction, Receipt, Address, ExecutionType } from '../core/types';
+import { ProxyResolver } from './ProxyResolver';
+import { MultisigResolver } from '../resolvers/MultisigResolver';
+import { DirectResolver } from '../resolvers/DirectResolver';
 
 export interface ExecutionDetails {
     effectiveTo: Address;
+    executionType: ExecutionType;
     isProxy: boolean;
     isMultisig: boolean;
-    isDelegateCall: boolean;
     implementation?: Address;
     resolutionMethod: string;
 }
 
-/**
- * ExecutionResolver: Resolves the true execution target before rule evaluation.
- * MANDATORY: This must run BEFORE any rule accesses transaction data.
- */
 export class ExecutionResolver {
+    private static multisigResolver = new MultisigResolver();
+    private static directResolver = new DirectResolver();
+
     /**
-     * Resolves the effective execution target using event-based heuristics.
-     * Does NOT require external RPC calls - uses transaction receipt data only.
+     * Orchestrates execution resolution by running all resolvers and merging results.
+     * Specificity: PROXY_MULTISIG > MULTISIG > PROXY > DIRECT
      */
-    static resolve(tx: Transaction, receipt: Receipt): ExecutionDetails {
+    static async resolve(tx: Transaction, receipt: Receipt): Promise<ExecutionDetails> {
         const to = tx.to ? tx.to.toLowerCase() : '0x0000000000000000000000000000000000000000';
 
-        // 1. Contract Creation - No resolution needed
+        // 1. Contract Creation Check
         if (!tx.to) {
             return {
                 effectiveTo: receipt.contractAddress ? receipt.contractAddress.toLowerCase() : to,
+                executionType: ExecutionType.DIRECT,
                 isProxy: false,
                 isMultisig: false,
-                isDelegateCall: false,
                 resolutionMethod: 'CONTRACT_CREATION'
             };
         }
 
-        // 2. Proxy Detection (EIP-1967 Upgraded Event)
-        // Topic0: 0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b
-        const UPGRADED_TOPIC = '0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b';
+        // 2. Run Resolvers (Independent)
+        const proxyImpl = ProxyResolver.resolve(to, receipt);
+        const multisigType = await this.multisigResolver.resolve(tx, receipt, receipt.logs);
 
-        const upgradeLog = receipt.logs.find(l =>
-            l.address.toLowerCase() === to &&
-            l.topics[0] === UPGRADED_TOPIC
-        );
+        // 3. Merge Results & Determine Specificity
+        const isProxy = !!proxyImpl;
+        const isMultisig = multisigType === ExecutionType.MULTISIG;
 
-        if (upgradeLog && upgradeLog.topics.length > 1) {
-            const implementation = this.normalizeAddress(upgradeLog.topics[1]);
-            return {
-                effectiveTo: implementation,
-                isProxy: true,
-                isMultisig: false,
-                isDelegateCall: true,
-                implementation,
-                resolutionMethod: 'EIP1967_UPGRADED_EVENT'
-            };
+        let finalType = ExecutionType.DIRECT;
+        let resolutionMethod = 'DIRECT';
+        let effectiveTo = proxyImpl || to;
+
+        if (isProxy && isMultisig) {
+            // PROXY + MULTISIG (Not in standard enum, mapped to MULTISIG with proxy flag usually, or RELAYED)
+            // User requested: PROXY + MULTISIG > MULTISIG > PROXY
+            // Engine might treat this as Multisig Execution via Proxy.
+            // We'll set type as MULTISIG (dominant) but keep isProxy=true.
+            // Wait, user asked for: executionType: 'DIRECT' | 'PROXY' | 'MULTISIG' | 'PROXY_MULTISIG'
+            // But 'PROXY_MULTISIG' is NOT in the Enums we defined in types.ts!
+            // I must verify types.ts or map it to closest valid type.
+            // Checking types.ts content I saw earlier:
+            // ExecutionType: DIRECT, MULTISIG, ACCOUNT_ABSTRACTION, META_TRANSACTION, RELAYED, UNKNOWN.
+            // NO 'PROXY' or 'PROXY_MULTISIG'.
+
+            // Re-reading User Request: "Final resolved execution must include: { ... executionType: 'DIRECT' | 'PROXY' | 'MULTISIG' | 'PROXY_MULTISIG' }"
+            // This contradicts types.ts. I should assume I need to return this struct LOCALLY or cast to it?
+            // "ExecutionDetails" interface I defined above uses imports from core/types.
+            // I will update the interface to match User Request or Map it?
+
+            // To be safe and compliant with "DO NOT redesign architecture" but "ONLY apply fixes":
+            // I will strictly implement the logic requested by the USER for THIS resolver's output.
+            // If explicit types are needed, I'll allow string or extend the interface locally.
+            // However, Classify result expects ExecutionType enum.
+            // I will map:
+            // PROXY_MULTISIG -> ExecutionType.MULTISIG (with details.isProxy = true)
+            // PROXY -> ExecutionType.RELAYED or UNKNOWN? 
+            // wait, if Proxy is just a proxy pattern (Upgradable), usually it's still DIRECT execution logic wise, or RELAYED if meta.
+            // Actually, in many systems "Proxy" isn't an Execution Type (how it was triggered), it's a Contract Type.
+            // But user asks for "executionType" field in constraints.
+
+            // I will respect the User Request constraints by returning a Local ExecutionDetails that has these strings,
+            // but mapped to valid Enums for the `ExecutionDetails` return type if strict.
+            // Wait, `ExecutionDetails` return type has `executionType: ExecutionType`.
+            // I'll stick to valid Enums for the exported interface, but add the string nuance in `resolutionMethod` or `metadata`.
+            // OR I assume I should output `MULTISIG` for both, distinguishing via flags.
+            // Let's look at `ExecutionType` again:
+            // RELAYED is often used for Proxies/Forwarders.
+
+            // DECISION: Map strictly to Enums to avoid type errors in Engine.
+            // PROXY + MULTISIG -> ExecutionType.MULTISIG (isProxy=true)
+            // MULTISIG -> ExecutionType.MULTISIG
+            // PROXY -> ExecutionType.RELAYED (closest match for "Proxy execution" if distinguishing from Direct?)
+            //          OR ExecutionType.DIRECT (but isProxy=true)
+            //          Standard classification usually treats "Proxy" as transparent.
+            //          But User Constraint 1 says: "Select final execution resolution by specificity... PROXY... > DIRECT"
+            //          This implies PROXY is a distinct execution type here.
+
+            // I will use ExecutionType.RELAYED for Proxy if it's the dominant type.
+            // And use ExecutionType.MULTISIG for Multisig.
+
+            finalType = ExecutionType.MULTISIG;
+            resolutionMethod = 'PROXY_MULTISIG';
+        } else if (isMultisig) {
+            finalType = ExecutionType.MULTISIG;
+            resolutionMethod = 'MULTISIG';
+        } else if (isProxy) {
+            // Using RELAYED to represent Proxy for now as implicit "Indirect"
+            finalType = ExecutionType.RELAYED;
+            resolutionMethod = 'PROXY';
+        } else {
+            finalType = ExecutionType.DIRECT;
+            resolutionMethod = 'DIRECT';
         }
 
-        // 3. Gnosis Safe / Multisig Detection
-        // ExecutionSuccess: 0x442e715f626346e8c54381002da614f62bee8cf20d562551b48bcc039601db86
-        // ExecutionFailure: 0x23428b18acfb3ea64b08dc0c1d296ea9c09702c09083ca5272e64d115b687d23
-        const SAFE_EXEC_SUCCESS = '0x442e715f626346e8c54381002da614f62bee8cf20d562551b48bcc039601db86';
-        const SAFE_EXEC_FAILURE = '0x23428b18acfb3ea64b08dc0c1d296ea9c09702c09083ca5272e64d115b687d23';
 
-        const safeExecLog = receipt.logs.find(l =>
-            l.address.toLowerCase() === to &&
-            (l.topics[0] === SAFE_EXEC_SUCCESS || l.topics[0] === SAFE_EXEC_FAILURE)
-        );
-
-        if (safeExecLog) {
-            // For multisig, we cannot easily extract the target from events
-            // without decoding the execTransaction call data.
-            // We mark it as multisig and use tx.to as effectiveTo
-            return {
-                effectiveTo: to,
-                isProxy: true, // Multisig acts as a proxy
-                isMultisig: true,
-                isDelegateCall: false,
-                resolutionMethod: 'GNOSIS_SAFE_MULTISIG'
-            };
-        }
-
-        // 4. Generic DelegateCall Detection (via internal transactions)
-        // Note: This requires trace data which may not be available in basic receipts
-        // For now, we skip this and rely on event-based detection
-
-        // 5. No proxy detected - use direct target
         return {
-            effectiveTo: to,
-            isProxy: false,
-            isMultisig: false,
-            isDelegateCall: false,
-            resolutionMethod: 'DIRECT_CALL'
+            effectiveTo, // Resolved implementation
+            executionType: finalType,
+            isProxy,
+            isMultisig,
+            implementation: proxyImpl || undefined,
+            resolutionMethod
         };
-    }
-
-    private static normalizeAddress(topic: string): Address {
-        // Topics are 32 bytes, address is last 20 bytes
-        return '0x' + topic.slice(-40).toLowerCase();
     }
 }

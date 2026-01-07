@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { Log, Address } from './types';
+import { Log, Address } from './core/types';
 
 export const COMMON_ABIS = {
     ERC20: [
@@ -51,28 +51,61 @@ export class Decoder {
         }
     }
 
-    static decodeERC1155Transfer(log: Log) {
+    static decodeERC1155TransferSingle(log: Log) {
         try {
-            // Try Single first
-            try {
-                const parsed = this.erc1155Interface.parseLog({
-                    topics: log.topics,
-                    data: log.data,
-                });
-                if (parsed) return parsed;
-            } catch { }
-
-            return null;
+            return this.erc1155Interface.parseLog({
+                topics: log.topics,
+                data: log.data,
+            });
         } catch {
             return null;
         }
     }
 
+    static decodeERC1155TransferBatch(log: Log) {
+        try {
+            return this.erc1155Interface.parseLog({
+                topics: log.topics,
+                data: log.data,
+            });
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Normalize Address to Checksum or Lowercase (Deterministic)
+     */
     static normalizeAddress(address: string): Address {
         try {
             return ethers.getAddress(address);
         } catch {
-            return address.toLowerCase();
+            return address.toLowerCase(); // Fallback for non-checksum safe addresses
+        }
+    }
+
+    /**
+     * Safe Address Comparison
+     */
+    static sameAddress(a: Address, b: Address): boolean {
+        if (!a || !b) return false;
+        return a.toLowerCase() === b.toLowerCase();
+    }
+
+    static isZeroAddress(a: Address): boolean {
+        if (!a) return true;
+        return /^0x0+$/.test(a);
+    }
+
+    /**
+     * Safe BigInt Parsing (No coercion)
+     */
+    static toBigInt(val: string | number | undefined): bigint {
+        if (!val) return BigInt(0);
+        try {
+            return BigInt(val);
+        } catch {
+            return BigInt(0);
         }
     }
 }

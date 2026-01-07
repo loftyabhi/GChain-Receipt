@@ -3,7 +3,6 @@ import { Transaction, Receipt, Log, TransactionType, IProtocolDetector, Protocol
 const DEX_EVENTS = {
     SWAP_V2: '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822',
     SWAP_V3: '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67',
-    SWAP_SUSHI: '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822',
     SWAP_BALANCER: '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b',
     TOKEN_EXCHANGE_CURVE: '0x8b3e96f2b889fa771c53c981b40daf005f63f637f1869f707052d15a3dd97140',
     MINT_V2: '0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f',
@@ -16,6 +15,17 @@ const DEX_EVENTS = {
 const DEX_METHODS = {
     ADD_LIQUIDITY: ['0xe8e33700', '0xf305d719'], // addLiquidity
     REMOVE_LIQUIDITY: ['0xbaa2abde', '0x02751cec'], // removeLiquidity
+    // Common Swap Selectors
+    SWAP_EXACT_TOKENS_FOR_TOKENS: '0x38ed1739',
+    SWAP_TOKENS_FOR_EXACT_TOKENS: '0x8803dbee',
+    SWAP_EXACT_ETH_FOR_TOKENS: '0x7ff36ab5',
+    SWAP_TOKENS_FOR_EXACT_ETH: '0x4a25d94a',
+    SWAP_EXACT_TOKENS_FOR_ETH: '0x18cbafe5',
+    SWAP_ETH_FOR_EXACT_TOKENS: '0xfb3bdb41',
+    EXACT_INPUT_SINGLE: '0x414bf389', // Uni V3
+    EXACT_OUTPUT_SINGLE: '0xdb3e2198', // Uni V3
+    EXACT_INPUT: '0xc04b8d59', // Uni V3
+    EXACT_OUTPUT: '0x09b81346', // Uni V3
 };
 
 const KNOWN_ROUTERS: Record<string, string> = {
@@ -30,6 +40,8 @@ const KNOWN_ROUTERS: Record<string, string> = {
     '0xdef1c0ded9bec7f1a1670819833240f027b25eff': '0x Proxy',
 };
 
+const DEX_SELECTORS = Object.values(DEX_METHODS).flat();
+
 export class DEXDetector implements IProtocolDetector {
     id = 'dex';
 
@@ -38,60 +50,65 @@ export class DEXDetector implements IProtocolDetector {
         const to = tx.to?.toLowerCase();
         const input = tx.data.toLowerCase();
 
-        // 1. Check Events for SWAP
-        const swapV3Log = logs.find(l => l.topics[0] === DEX_EVENTS.SWAP_V3);
-        const swapV2Log = logs.find(l => l.topics[0] === DEX_EVENTS.SWAP_V2);
-        const swapBalancerLog = logs.find(l => l.topics[0] === DEX_EVENTS.SWAP_BALANCER);
-        const exchangeCurveLog = logs.find(l => l.topics[0] === DEX_EVENTS.TOKEN_EXCHANGE_CURVE);
+        // Start with 0 confidence
+        let confidence = 0.0;
+        let protocol = 'DEX';
+        let detectedType = TransactionType.SWAP;
 
-        // 2. Check Events for Liquidity
-        const mintLog = logs.find(l => l.topics[0] === DEX_EVENTS.MINT_V2 || l.topics[0] === DEX_EVENTS.MINT_V3);
-        const burnLog = logs.find(l => l.topics[0] === DEX_EVENTS.BURN_V2 || l.topics[0] === DEX_EVENTS.BURN_V3);
-        const curveAddLiq = logs.find(l => l.topics[0] === DEX_EVENTS.ADD_LIQUIDITY_CURVE);
-
-        // Determine Type
-        if (mintLog || curveAddLiq || DEX_METHODS.ADD_LIQUIDITY.some(sig => input.startsWith(sig))) {
-            return {
-                name: this.resolveName(to, 'DEX'),
-                confidence: 0.9,
-                type: TransactionType.ADD_LIQUIDITY,
-            };
-        }
-
-        if (burnLog || DEX_METHODS.REMOVE_LIQUIDITY.some(sig => input.startsWith(sig))) {
-            return {
-                name: this.resolveName(to, 'DEX'),
-                confidence: 0.9,
-                type: TransactionType.REMOVE_LIQUIDITY,
-            };
-        }
-
-        if (swapV3Log || swapV2Log || swapBalancerLog || exchangeCurveLog) {
-            let protocol = 'DEX';
-            if (swapV3Log) protocol = 'Uniswap V3 Compatible';
-            if (swapV2Log) protocol = 'Uniswap V2 Compatible';
-            if (swapBalancerLog) protocol = 'Balancer';
-            if (exchangeCurveLog) protocol = 'Curve';
-
-            // Refine with Router logic
-            if (to && KNOWN_ROUTERS[to]) {
-                protocol = KNOWN_ROUTERS[to];
-            }
-
-            return {
-                name: protocol,
-                confidence: 0.95,
-                type: TransactionType.SWAP,
-            };
-        }
-
-        return null;
-    }
-
-    private resolveName(to: string | null | undefined, defaultName: string): string {
+        // 1. Known Router Address (+0.25)
         if (to && KNOWN_ROUTERS[to]) {
-            return KNOWN_ROUTERS[to];
+            confidence += 0.25;
+            protocol = KNOWN_ROUTERS[to];
         }
-        return defaultName;
+
+        // 2. Selector Matching (+0.15) - Adjusted per tuning
+        // Check if input data starts with known DEX method
+        const selector = input.slice(0, 10);
+        if (DEX_SELECTORS.includes(selector)) {
+            confidence += 0.15;
+        }
+
+        // 3. Pool Semantics (+0.15)
+        const swapLogs = logs.filter(l => [
+            DEX_EVENTS.SWAP_V2, DEX_EVENTS.SWAP_V3, 
+            DEX_EVENTS.SWAP_BALANCER, DEX_EVENTS.TOKEN_EXCHANGE_CURVE
+        ].includes(l.topics[0]));
+        
+        if (swapLogs.length > 0) {
+            confidence += 0.15;
+            // Refine Protocol Name if unknown
+            if (protocol === 'DEX') {
+                if (swapLogs.some(l => l.topics[0] === DEX_EVENTS.SWAP_V3)) protocol = 'Uniswap V3 Compatible';
+                else if (swapLogs.some(l => l.topics[0] === DEX_EVENTS.SWAP_V2)) protocol = 'Uniswap V2 Compatible';
+                else if (swapLogs.some(l => l.topics[0] === DEX_EVENTS.SWAP_BALANCER)) protocol = 'Balancer';
+                else if (swapLogs.some(l => l.topics[0] === DEX_EVENTS.TOKEN_EXCHANGE_CURVE)) protocol = 'Curve';
+            }
+        }
+
+        // 4. Liquidity Penalty (-0.2)
+        const mintLog = logs.some(l => l.topics[0] === DEX_EVENTS.MINT_V2 || l.topics[0] === DEX_EVENTS.MINT_V3 || l.topics[0] === DEX_EVENTS.ADD_LIQUIDITY_CURVE);
+        const burnLog = logs.some(l => l.topics[0] === DEX_EVENTS.BURN_V2 || l.topics[0] === DEX_EVENTS.BURN_V3);
+        
+        if ((mintLog || burnLog) && swapLogs.length === 0) {
+            confidence -= 0.2;
+            // If it's pure liquidity, we might want to change type, but here we are vetting *Swap* primarily.
+            // If the user wants specific liquidity detection, that should be a separate rule/flow check.
+            // For now, we penalize the "Swap" signal.
+            if (mintLog) detectedType = TransactionType.ADD_LIQUIDITY;
+            else if (burnLog) detectedType = TransactionType.REMOVE_LIQUIDITY;
+        }
+
+        // 5. Cap Total Boost (+0.35)
+        // Ensure DEX signal is assistive, not authoritative.
+        confidence = Math.min(confidence, 0.35);
+
+        // Filter: Requires positive signal
+        if (confidence <= 0) return null;
+
+        return {
+            name: protocol,
+            confidence,
+            type: detectedType,
+        };
     }
 }

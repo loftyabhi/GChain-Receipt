@@ -85,6 +85,13 @@ export interface BillViewModel {
     TOTAL_FEE: string;
     TOTAL_FEE_USD: string;
 
+    // Enterprise Classification Extras
+    CONFIDENCE_LEVEL: 'Confirmed' | 'High' | 'Likely' | 'Complex';
+    CONFIDENCE_LABEL: string;
+    SECONDARY_ACTIONS: string[];
+    EXECUTION_TYPE_LABEL: string;
+    RISK_WARNINGS: string[];
+
     // Totals
     TOTAL_IN_USD: string;
     TOTAL_OUT_USD: string;

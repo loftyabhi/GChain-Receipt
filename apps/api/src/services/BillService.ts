@@ -104,6 +104,13 @@ export interface BillViewModel {
     TOTAL_FEE: string;
     TOTAL_FEE_USD: string;
 
+    // Enterprise Classification Extras
+    CONFIDENCE_LEVEL: 'Confirmed' | 'High' | 'Likely' | 'Complex';
+    CONFIDENCE_LABEL: string;
+    SECONDARY_ACTIONS: string[];
+    EXECUTION_TYPE_LABEL: string;
+    RISK_WARNINGS: string[];
+
     // Totals
     TOTAL_IN_USD: string;
     TOTAL_OUT_USD: string;
@@ -593,6 +600,7 @@ export class BillService {
         const aliasAddress = classification.executionType === ExecutionType.ACCOUNT_ABSTRACTION ? txOrigin : undefined;
         const isRelevent = (addr: string): boolean => addr === userAddress || (aliasAddress !== undefined && addr === aliasAddress);
 
+
         let relevantRaw = raw.filter(m => isRelevent(m.from) || isRelevent(m.to));
 
         if (relevantRaw.length === 0) {
@@ -708,6 +716,7 @@ export class BillService {
             });
             const data = await res.json();
             if (data.result?.transfers) {
+
                 return data.result.transfers
                     .filter((t: any) => t.hash && t.hash.toLowerCase() === txHash.toLowerCase())
                     .map((t: any) => ({
@@ -796,12 +805,61 @@ export class BillService {
         const randomAd = await this.adminService.getRandomAd('pdf');
         const qrCodeDataUrl = await QRCode.toDataURL(this.getExplorerUrl(chainId, tx.hash));
 
+        // --- Enterprise Mapping Logic ---
+
+        // 1. Confidence Mapping
+        let confLevel: 'Confirmed' | 'High' | 'Likely' | 'Complex' = 'Complex';
+        const confScore = classification.confidence.score;
+
+        if (confScore >= 0.85) confLevel = 'Confirmed';
+        else if (confScore >= 0.70) confLevel = 'High';
+        else if (confScore >= 0.55) confLevel = 'Likely';
+
+        const confLabel = {
+            'Confirmed': 'Confirmed',
+            'High': 'High Confidence',
+            'Likely': 'Likely',
+            'Complex': 'Complex / Unclassified'
+        }[confLevel];
+
+        // 2. Execution Type
+        const execLabel = classification.executionType === ExecutionType.DIRECT ? 'Direct' :
+            classification.executionType === ExecutionType.ACCOUNT_ABSTRACTION ? 'Smart Account' :
+                classification.executionType === ExecutionType.MULTISIG ? 'Multisig' : 'Proxy';
+
+        // 3. Secondary Actions (Extract from reasons/breakdown if possible, or future expansion)
+        // Currently we use classification reasons as a proxy for interesting details if they aren't the primary.
+        // Filter out generic reasons.
+        // Filter out generic reasons.
+        const reasonsRaw = classification.confidence?.reasons;
+        const reasons = Array.isArray(reasonsRaw) ? reasonsRaw : [];
+
+        const secondaryActions = reasons.filter((r: string) =>
+            !r.includes('Signal Boost') &&
+            !r.includes('Flow Base') &&
+            !r.includes(classification.functionalType) // Don't repeat primary type
+        );
+
+        // 4. Risk Warnings
+        const risks: string[] = [];
+        if (classification.confidence.score < 0.5) risks.push("Low confidence classification - Verify manually");
+        if (tx.data.length > 2 && tx.to === null) risks.push("Contract Creation");
+        // Add specific protocol warnings if available in future
+
         return {
             BILL_ID: forcedBillId || `BILL-${chainId}-${receipt.blockNumber}-${tx.hash.slice(0, 6)}`,
-            BILL_VERSION: "2.6.0 (Enterprise)",
-            GENERATED_AT: now.toLocaleString('en-US', { timeZoneName: 'short' }),
-            STATUS: receipt.status === 1 ? "confirmed" : "failed",
+            BILL_VERSION: "2.0 (Enterprise)",
+            GENERATED_AT: now.toISOString(),
+            STATUS: receipt.status === 1 ? 'COMPLETED' : 'FAILED',
             STATUS_CONFIRMED: receipt.status === 1,
+
+            // Enterprise Fields
+            CONFIDENCE_LEVEL: confLevel,
+            CONFIDENCE_LABEL: confLabel,
+            SECONDARY_ACTIONS: secondaryActions,
+            EXECUTION_TYPE_LABEL: execLabel,
+            RISK_WARNINGS: risks,
+
             CHAIN_NAME: this.getChainName(chainId),
             CHAIN_ID: chainId,
             CHAIN_SYMBOL: this.getNativeSymbol(chainId),

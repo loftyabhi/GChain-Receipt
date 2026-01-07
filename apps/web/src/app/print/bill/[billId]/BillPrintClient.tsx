@@ -173,10 +173,32 @@ export default function BillPrintClient() {
                                         <span>{data.CHAIN_NAME} ({data.CHAIN_ID})</span>
                                     </div>
 
-                                    <div className="status-badge" style={{ background: '#f1f5f9', color: '#64748b' }}>
-                                        <span>NATIVE TRANSFER</span>
+                                    <div className="flex items-center gap-2">
+                                        <div className={`status-badge ${data.EXECUTION_TYPE_LABEL === 'Direct' ? '' :
+                                            data.EXECUTION_TYPE_LABEL === 'Smart Account' ? 'info' : 'warning'
+                                            }`}>
+                                            <span style={{ fontSize: '12px' }}>
+                                                {data.EXECUTION_TYPE_LABEL === 'Direct' ? '👤' :
+                                                    data.EXECUTION_TYPE_LABEL === 'Smart Account' ? '🤖' :
+                                                        data.EXECUTION_TYPE_LABEL === 'Multisig' ? '👥' : '🔄'}
+                                            </span>
+                                            <span>{data.EXECUTION_TYPE_LABEL}</span>
+                                        </div>
+                                        <div className={`status-badge ${data.CONFIDENCE_LEVEL === 'Confirmed' ? 'confirmed' :
+                                            data.CONFIDENCE_LEVEL === 'High' ? 'confirmed' :
+                                                data.CONFIDENCE_LEVEL === 'Likely' ? 'warning' : 'failed'
+                                            }`}>
+                                            <span style={{ marginRight: '4px' }}>
+                                                {data.CONFIDENCE_LEVEL === 'Confirmed' ? '🛡️' :
+                                                    data.CONFIDENCE_LEVEL === 'High' ? '✅' :
+                                                        data.CONFIDENCE_LEVEL === 'Likely' ? '⚠️' : '❓'}
+                                            </span>
+                                            <span>{data.CONFIDENCE_LABEL.toUpperCase()}</span>
+                                        </div>
                                     </div>
                                 </div>
+
+
 
                                 {/* KEY METRICS */}
                                 <div className="grid-4">
@@ -375,6 +397,72 @@ export default function BillPrintClient() {
                                         </div>
                                     )
                                 }
+
+                                {/* CLASSIFICATION & COMPLIANCE FOOTER */}
+                                <div className="classification-section">
+                                    <div className="classification-header">
+                                        <div>
+                                            <div className="uppercase-label" style={{ marginBottom: '4px' }}>Primary Classification</div>
+                                            <div className="primary-action-hero">
+                                                <span>{data.TYPE_ICON || '📝'}</span>
+                                                <span>{data.TYPE_READABLE}</span>
+                                            </div>
+                                        </div>
+                                        {/* Optional: Place Audit Badges here if desired, or keep separate. */}
+                                    </div>
+
+                                    <div className="compliance-grid">
+                                        <div className="compliance-col">
+                                            <div className="label">Supplementary Actions</div>
+                                            {data.SECONDARY_ACTIONS.length > 0 ? (
+                                                <div className="chip-container">
+                                                    {data.SECONDARY_ACTIONS.map((action, idx) => (
+                                                        <div key={idx} className="chip">
+                                                            <span>{action}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-secondary text-xs italic">None detected</div>
+                                            )}
+                                        </div>
+                                        <div className="compliance-col">
+                                            <div className="label">Risk Factors</div>
+                                            {data.RISK_WARNINGS.length > 0 ? (
+                                                <div className="risk-callout" style={{ margin: 0 }}>
+                                                    <div className="risk-title">⚠️ Warning</div>
+                                                    <ul style={{ margin: '0 0 0 16px', padding: 0 }}>
+                                                        {data.RISK_WARNINGS.map((w, i) => {
+                                                            const trigger = "Verify manually";
+                                                            if (w.includes(trigger)) {
+                                                                const parts = w.split(trigger);
+                                                                return (
+                                                                    <li key={i}>
+                                                                        {parts[0]}
+                                                                        <a
+                                                                            href={data.EXPLORER_URL}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            style={{ color: 'inherit', textDecoration: 'underline', fontWeight: 'bold' }}
+                                                                        >
+                                                                            {trigger}
+                                                                        </a>
+                                                                        {parts[1]}
+                                                                    </li>
+                                                                );
+                                                            }
+                                                            return <li key={i}>{w}</li>;
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            ) : (
+                                                <div className="status-badge" style={{ background: '#ecfdf5', color: '#065f46', width: 'fit-content' }}>
+                                                    <span>✅ Zero Risk</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <div style={{ marginTop: 'auto' }}></div>
 

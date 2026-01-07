@@ -18,9 +18,20 @@ import { BridgeRule } from '../rules/bridge/BridgeRule';
 import { LendingRule } from '../rules/lending/LendingRule';
 import { TransferRule } from '../rules/transfer/TransferRule';
 import { ContractCreationRule } from '../rules/creation/ContractCreationRule';
+import { GovernanceRule } from '../rules/governance/GovernanceRule';
+
+interface ExtendedRuleResult extends RuleResult {
+    priority: number;
+    ruleId: string;
+}
 
 export class ClassificationEngine {
     private rules: ClassificationRule[] = [];
+    private resultCache = new Map<string, ClassificationResult>();
+    // Cache size limit to prevent memory leaks
+    private readonly MAX_CACHE_SIZE = 100;
+    // Global minimum confidence threshold
+    private readonly MIN_CONFIDENCE = 0.55;
 
     constructor() {
         this.registerRules();
@@ -30,9 +41,10 @@ export class ClassificationEngine {
         // Register ALL rules
         const rawRules = [
             new ContractCreationRule(),
-            new SwapRule(),
             new BridgeRule(),
             new LendingRule(),
+            new GovernanceRule(),
+            new SwapRule(),
             new NFTSaleRule(),
             new TransferRule()
         ];
@@ -41,13 +53,38 @@ export class ClassificationEngine {
         this.rules = rawRules.sort((a, b) => b.priority - a.priority);
     }
 
+    /**
+     * Helper to deeply freeze the context to maintain immutability across rules
+     */
+    private freezeContext(ctx: any) {
+        if (ctx && typeof ctx === 'object' && !Object.isFrozen(ctx)) {
+            Object.freeze(ctx);
+            Object.keys(ctx).forEach(prop => this.freezeContext(ctx[prop]));
+        }
+        return ctx;
+    }
+
+    /**
+     * Normalizes confidence score to 0.0 - 1.0 range
+     */
+    private normalizeConfidence(score: number): number {
+        return Math.min(1, Math.max(0, score));
+    }
+
     public async classify(tx: Transaction, receipt: Receipt, chainId: number): Promise<ClassificationResult> {
+        // 0. Check Cache (Deterministic Rule Engine Result Caching)
+        // Caveat 1: Cache Key Must Include Chain ID
+        const cacheKey = `${chainId}:${tx.hash}`;
+        if (this.resultCache.has(cacheKey)) {
+            return this.resultCache.get(cacheKey)!;
+        }
+
         // --- PHASE 1: Normalization & Execution Resolution ---
         // Resolves Proxies, Multisigs, and Contracts BEFORE any rule sees the tx.
-        const executionDetails = ExecutionResolver.resolve(tx, receipt);
+        const executionDetails = await ExecutionResolver.resolve(tx, receipt);
 
         // --- PHASE 2: Log Decoding & Token Flow ---
-        // Captures Native, ERC20, ERC721 movements (and internal txs if available later)
+        // Captures Native, ERC20, ERC721 movements
         const flow = TokenFlowAnalyzer.analyze(receipt.logs, tx.value, tx.from, tx.to, []);
 
         // --- PHASE 3: Context Assembly (Immutable/Frozen) ---
@@ -58,28 +95,24 @@ export class ClassificationEngine {
             chainId,
             executionDetails
         );
+        // Enforce strict immutability
+        this.freezeContext(ctx);
 
-        // --- PHASE 4: Rule Evaluation (Strict First-Match) ---
-        let bestMatch: RuleResult | null = null;
+        // --- PHASE 4: Rule Evaluation (Evaluate All) ---
+        const candidates: ExtendedRuleResult[] = [];
 
         interface DebugTraceEntry {
             rule: string;
             priority: number;
             matched: boolean;
             classified: boolean;
+            confidence?: number;
             error?: string;
-            failureReason?: string;
         }
-
         const debugTrace: DebugTraceEntry[] = [];
-        const executionInfo = {
-            effectiveTo: executionDetails.effectiveTo,
-            resolutionMethod: executionDetails.resolutionMethod,
-            isProxy: executionDetails.isProxy,
-            isMultisig: executionDetails.isMultisig,
-            isDelegateCall: executionDetails.isDelegateCall
-        };
+        const finalExecutionType = executionDetails.isProxy ? ExecutionType.RELAYED : ExecutionType.DIRECT;
 
+        // Loop Rules
         for (const rule of this.rules) {
             const entry: DebugTraceEntry = {
                 rule: rule.id,
@@ -88,9 +121,8 @@ export class ClassificationEngine {
                 classified: false
             };
 
-            // 1. Check Applicability (Pure Check)
+            // 1. Check Applicability
             if (!rule.matches(ctx)) {
-                entry.failureReason = 'matches() returned false';
                 debugTrace.push(entry);
                 continue;
             }
@@ -99,95 +131,172 @@ export class ClassificationEngine {
 
             // 2. Evaluate & Classify
             try {
-                // If matches() is true, we attempt classification.
-                // The first rule to return a result is the FINAL classification.
-                // We trust the Priority Order implicitly.
-                const result = rule.classify(ctx);
+                const res = rule.classify(ctx);
+                if (res) {
+                    // Caveat 2: Contract Creation Bypass
+                    if (res.type === TransactionType.CONTRACT_DEPLOYMENT) {
+                        // Return Immediately - Deterministic Semantic
+                        const result: ClassificationResult = {
+                            functionalType: TransactionType.CONTRACT_DEPLOYMENT,
+                            executionType: finalExecutionType,
+                            confidence: {
+                                score: 1.0,
+                                reasons: ['Deterministic Contract Creation (Target Null/Deployment)']
+                            },
+                            details: {
+                                protocol: 'Contract Deployment',
+                                ...executionDetails,
+                                debugTrace: process.env.DEBUG_CLASSIFIER ? debugTrace : undefined
+                            }
+                        };
 
-                if (result) {
+                        this.cacheResult(cacheKey, result);
+                        return result;
+                    }
+
+                    const normalizedScore = this.normalizeConfidence(res.confidence);
+
+                    // Only consider results meeting the global threshold
+                    if (normalizedScore >= this.MIN_CONFIDENCE) {
+                        candidates.push({
+                            ...res,
+                            confidence: normalizedScore,
+                            priority: rule.priority,
+                            ruleId: rule.id
+                        });
+                    }
+
                     entry.classified = true;
+                    entry.confidence = normalizedScore;
                     debugTrace.push(entry);
-                    bestMatch = result;
-                    break; // STOP IMMEDIATELY
                 } else {
-                    entry.failureReason = 'classify() returned null';
                     debugTrace.push(entry);
                 }
             } catch (e: any) {
                 entry.error = e.message;
-                entry.failureReason = 'classify() threw exception';
                 debugTrace.push(entry);
             }
         }
 
-        // --- PHASE 5: Deliver Result ---
+        // --- PHASE 5: Selection & Conflict Resolution ---
 
-        // Determine Execution Type Final Label
-        const finalExecutionType = executionDetails.isProxy ? ExecutionType.RELAYED : ExecutionType.DIRECT;
+        // Sort by Confidence DESC, then Priority DESC
+        candidates.sort((a, b) => {
+            if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+            return b.priority - a.priority;
+        });
 
-        // A. Match Found
-        if (bestMatch) {
-            const nearMisses = debugTrace.filter(e => e.matched && !e.classified).slice(0, 2);
-            return {
+        // Detect and Penalize Conflicting Signals
+        if (candidates.length > 1) {
+            const top = candidates[0];
+            const runnerUp = candidates[1];
+            // If the difference is small (< 10%), dampen the confidence of the top result
+            if ((top.confidence - runnerUp.confidence) < 0.1) {
+                top.confidence *= 0.9;
+                // Since confidence changed, we must re-sort to ensure correctness
+                candidates.sort((a, b) => {
+                    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+                    return b.priority - a.priority;
+                });
+            }
+        }
+
+        const bestMatch = candidates[0];
+
+        let finalResult: ClassificationResult;
+
+        // Check if we have a valid winner after penalty
+        if (bestMatch && bestMatch.confidence >= this.MIN_CONFIDENCE) {
+            // "Secondary Matches" (Non-breaking) - Keep other high-confidence matches
+            // Caveat 3: Secondary Results Must Be Non-Recursive (mapToResult handles this)
+            const secondaryMatches = candidates.slice(1).map(c => this.mapToResult(c, executionDetails, finalExecutionType));
+
+            finalResult = {
                 functionalType: bestMatch.type,
-                executionType: finalExecutionType, // Decoupled from Functional Type
+                executionType: finalExecutionType,
                 confidence: {
                     score: bestMatch.confidence,
-                    reasons: [
-                        ...bestMatch.reasons,
-                        `Execution: ${executionDetails.resolutionMethod}`,
-                        ...(nearMisses.length > 0 ? [`Near misses: ${JSON.stringify(nearMisses)}`] : [])
-                    ]
+                    reasons: bestMatch.reasons
                 },
                 details: {
                     protocol: bestMatch.protocol,
                     ...executionDetails, // Include proxy details in output
                     debugTrace: process.env.DEBUG_CLASSIFIER ? debugTrace : undefined
                 },
-                protocol: bestMatch.protocol
+                protocol: bestMatch.protocol,
+                secondary: secondaryMatches.length > 0 ? secondaryMatches : undefined
             };
+        } else {
+            // Fallback Logic
+            if (receipt.status !== 0) {
+                // Transaction succeeded but no rule matched with high confidence
+                const topNearMisses = debugTrace.filter(e => e.matched).map(e => `${e.rule} (${e.confidence?.toFixed(2) || 'N/A'})`);
+
+                finalResult = {
+                    functionalType: TransactionType.UNCLASSIFIED_COMPLEX,
+                    executionType: finalExecutionType,
+                    confidence: {
+                        score: 0.3, // Low confidence fallback
+                        reasons: [
+                            'No rule met global confidence threshold',
+                            `Threshold: ${this.MIN_CONFIDENCE}`,
+                            `Candidates found: ${candidates.length}`,
+                            ...(topNearMisses.length > 0 ? [`Near misses: ${topNearMisses.join(', ')}`] : [])
+                        ]
+                    },
+                    details: {
+                        protocol: 'Unknown Protocol',
+                        ...executionDetails,
+                        debugTrace: process.env.DEBUG_CLASSIFIER ? debugTrace : undefined
+                    }
+                };
+            } else {
+                // Transaction Failed
+                finalResult = {
+                    functionalType: TransactionType.UNKNOWN,
+                    executionType: ExecutionType.UNKNOWN,
+                    confidence: {
+                        score: 0,
+                        reasons: [
+                            'Transaction Failed (Status 0)',
+                            `Execution: ${executionDetails.resolutionMethod}`
+                        ]
+                    },
+                    details: {
+                        ...executionDetails,
+                        debugTrace: process.env.DEBUG_CLASSIFIER ? debugTrace : undefined
+                    }
+                };
+            }
         }
 
-        // B. Fallback: Successful Transaction but No Semantic Match
-        if (receipt.status !== 0) {
-            const topNearMisses = debugTrace.filter(e => e.matched).slice(0, 2);
-            return {
-                functionalType: TransactionType.CONTRACT_INTERACTION,
-                executionType: finalExecutionType,
-                confidence: {
-                    score: 0.1, // Low confidence generic fallback
-                    reasons: [
-                        'Fallback: Valid execution but no semantic rule matched',
-                        `Execution: ${executionDetails.resolutionMethod}`,
-                        `Top near-matches: ${JSON.stringify(topNearMisses)}`
-                    ]
-                },
-                details: {
-                    protocol: 'Unknown Protocol',
-                    ...executionDetails,
-                    debugTrace: process.env.DEBUG_CLASSIFIER ? debugTrace : undefined
-                }
-            };
-        }
+        this.cacheResult(cacheKey, finalResult);
 
-        // C. Terminal Unknown (Failed Tx or total miss)
-        const topNearMisses = debugTrace.filter(e => e.matched).slice(0, 2);
+        return finalResult;
+    }
+
+    private cacheResult(key: string, result: ClassificationResult) {
+        if (this.resultCache.size >= this.MAX_CACHE_SIZE) {
+            const firstKey = this.resultCache.keys().next().value;
+            if (firstKey) this.resultCache.delete(firstKey);
+        }
+        this.resultCache.set(key, result);
+    }
+
+    private mapToResult(match: ExtendedRuleResult, execDetails: any, execType: ExecutionType): ClassificationResult {
         return {
-            functionalType: TransactionType.UNKNOWN,
-            executionType: ExecutionType.UNKNOWN,
+            functionalType: match.type,
+            executionType: execType,
             confidence: {
-                score: 0,
-                reasons: [
-                    'No rule matched any transaction pattern',
-                    `Execution: ${executionDetails.resolutionMethod}`,
-                    `Rules evaluated: ${debugTrace.length}`,
-                    ...(topNearMisses.length > 0 ? [`Top near-matches: ${JSON.stringify(topNearMisses)}`] : [])
-                ]
+                score: match.confidence,
+                reasons: match.reasons
             },
             details: {
-                ...executionDetails,
-                debugTrace: process.env.DEBUG_CLASSIFIER ? debugTrace : undefined
-            }
+                protocol: match.protocol,
+                ...execDetails
+            },
+            protocol: match.protocol,
+            secondary: undefined // Caveat 3: Explicitly undefined to prevent recursion
         };
     }
 }

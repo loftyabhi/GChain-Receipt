@@ -2,103 +2,141 @@
 import { ClassificationContext } from '../../core/Context';
 import { ClassificationRule, RuleResult } from '../../core/Rule';
 import { TransactionType } from '../../core/types';
-import { Decoder } from '../../utils';
 
 export class TransferRule implements ClassificationRule {
     public id = 'core_transfer';
     public name = 'Token/Native Transfer';
-    public priority = 40;
+    public priority = 40; // Low priority (Fallback)
 
     public matches(ctx: ClassificationContext): boolean {
-        // Fast Check: Logs OR Value.
-        if (BigInt(ctx.tx.value) > BigInt(0)) return true;
-        if (ctx.receipt.logs.length > 0) return true;
-        return false;
+        // Strict Matches Logic as requested:
+        // Return true only if simple enough to be a transfer.
+
+        // 1. Must have flow or value
+        const hasValue = BigInt(ctx.tx.value) > BigInt(0);
+        const hasLogs = ctx.receipt.logs.length > 0;
+        if (!hasValue && !hasLogs) return false;
+
+        // 2. Exclude Obvious Complex Flows (Swap/NFT Sale signals) at Match level?
+        // User requirements: "No NFT movement... No swap-like bidirectional flow..."
+        // If we filter here, we save processing.
+        const sender = ctx.tx.from.toLowerCase();
+        const flow = ctx.flow[sender];
+
+        if (flow) {
+            // Bidirectional Check (Swap-like)
+            // (Strict Gate: If netOut AND netIn, it's not a simple transfer)
+            const netOutCount = flow.outgoing.filter(a => BigInt(a.amount) > BigInt(0)).length;
+            const netInCount = flow.incoming.filter(a => BigInt(a.amount) > BigInt(0)).length;
+            if (netOutCount > 0 && netInCount > 0) return false;
+
+            // Multiple Assets Check (Bulk/Complex)
+            // If we rely on classify to handle "Exactly one", we can skip here, but user asked for "matches() must return true only if..."
+            // Let's implement strict gates in classify() primarily to provide reasons, 
+            // but reject bidirectional here to adhere to "No swap-like bidirectional flow".
+            // Actually, "Matches" returning false makes the rule invisible. 
+            // "Classify" returning null allows logging "Matched but filtered".
+
+            // The user explicitly listed: "If user has netOut AND netIn: return null;" in the section "TransferRule.ts — Strict Fallback Semantics".
+            // This was listed under general requirements, likely for classify().
+            // However, Section 3 says "TransferRule matches() must return true only if: No swap-like bidirectional flow".
+            // So I will enforce it here.
+        }
+
+        return true;
     }
 
     public classify(ctx: ClassificationContext): RuleResult {
-        // 1. Native Transfer (Phase 4 Requirement: First class citizen)
-        // If Data is Empty (or '0x') AND Value > 0 -> Native Transfer
-        // BUT Phase 2 says "Contract Creation" is handled by priority 100.
-        // We assume ctx.tx.to is valid (not creation).
-        if (ctx.tx.data === '0x' && BigInt(ctx.tx.value) > BigInt(0)) {
-            // Strictly Native, No Logs usually.
-            // If there ARE logs but data is empty? (Fallback function emiting events?)
-            // If logs exist, it might be Complex Transfer.
-            if (ctx.receipt.logs.length === 0) {
-                return {
-                    type: TransactionType.NATIVE_TRANSFER,
-                    confidence: 1.0,
-                    breakdown: { executionMatch: 1.0, tokenFlowMatch: 1.0, methodMatch: 1.0, eventMatch: 0, addressMatch: 0 },
-                    reasons: ['Native ETH transfer (0x data, value > 0)']
-                };
+        const sender = ctx.tx.from.toLowerCase();
+        const flow = ctx.flow[sender];
+
+        // --- 0. PRE-FLIGHT CHECK (Strict Fallback) ---
+        // If bidirectional, return null (Swap/Lending territory)
+        if (flow) {
+            const hasOut = flow.outgoing.some(a => BigInt(a.amount) > BigInt(0));
+            const hasIn = flow.incoming.some(a => BigInt(a.amount) > BigInt(0));
+            if (hasOut && hasIn) return null as any;
+        }
+
+        // --- 1. NATIVE TRANSFER CHECK ---
+        // tx.value > 0, data == '0x', No internal calls moving assets (implies strict flow check)
+        const isNative = ctx.tx.data === '0x' && BigInt(ctx.tx.value) > BigInt(0);
+
+        if (isNative) {
+            // "No internal calls moving assets"
+            // If logs exist, it might be a contract receiving ETH and doing something.
+            // If flow exists (sender -> recipient), check if only 1 movement.
+            if (flow) {
+                // Should have exactly 1 outgoing (ETH) and 0 incoming.
+                // And ideally no other logs (simple transfer).
+                // If logs exist, it's strictly "Contract Interaction" fallback unless classified elsewhere.
+                const isSimple = flow.outgoing.length === 1 && flow.outgoing[0].type === 'NATIVE' && flow.incoming.length === 0;
+                if (isSimple && ctx.receipt.logs.length === 0) {
+                    return {
+                        type: TransactionType.NATIVE_TRANSFER,
+                        confidence: 0.6, // Max confidence cap
+                        breakdown: { executionMatch: 1.0, tokenFlowMatch: 1.0, methodMatch: 1.0, eventMatch: 0, addressMatch: 1.0 },
+                        reasons: ['Native ETH transfer (0x data, value > 0)']
+                    };
+                }
             }
         }
 
-        // 2. Token Flow Analysis (Sender Centric)
-        // We use effectiveTo to check if it's a direct call to the token contract.
-        const sender = ctx.tx.from.toLowerCase();
-        const flow = ctx.flow[sender];
-        if (!flow) throw new Error("No flow found for sender");
+        if (!flow) return null as any; // Needed for Token checks
 
-        const outCount = flow.outgoing.length;
-        const inCount = flow.incoming.length;
+        // --- 2. TOKEN TRANSFER ---
+        // "Exactly one ERC20 transfer. User is sender OR receiver. No other asset movements."
+        const erc20Out = flow.outgoing.filter(m => m.type === 'ERC20');
+        const erc20In = flow.incoming.filter(m => m.type === 'ERC20');
+        const allOut = flow.outgoing;
+        const allIn = flow.incoming;
 
-        // Simple Transfer: 1 OUT, 0 IN
-        if (outCount === 1 && inCount === 0) {
-            const movement = flow.outgoing[0];
-
-            // Validate Type
-            let type = TransactionType.TOKEN_TRANSFER;
-            if (movement.type === 'ERC721') type = TransactionType.NFT_TRANSFER; // ERC721
-            if (movement.type === 'ERC1155') type = TransactionType.NFT_TRANSFER; // Simplify
-            if (movement.type === 'NATIVE') type = TransactionType.NATIVE_TRANSFER;
-
-            // Direct Call Check: Did we call the token contract directly?
-            // movement.asset is string address or 'native'.
-            const isDirectCall = movement.asset !== 'native' &&
-                ctx.effectiveTo === movement.asset.toLowerCase();
-
-            // If it's a Native Transfer (asset='native'), EffectiveTo should be the Recipient.
-            // If asset 'native' and we are sending to a Contract (that doesn't emit logs), it's NATIVE_TRANSFER? 
-            // Or Contract Interaction?
-            // If logs.length == 0, we already caught it above. 
-            // If logs.length > 0, it's likely an interaction that spent ETH.
-
-            if (movement.type === 'NATIVE' && ctx.receipt.logs.length > 0) {
-                // Sent ETH, got logs. Interaction.
-                // Sent ETH, got logs. Interaction.
-                throw new Error("Native Transfer with Logs -> Fallback");
-            }
-
+        // Outgoing Transfer
+        if (allOut.length === 1 && allIn.length === 0 && erc20Out.length === 1) {
             return {
-                type: type,
-                confidence: isDirectCall ? 0.95 : 0.85, // High confidence for simple flow
-                breakdown: { tokenFlowMatch: 1.0, addressMatch: isDirectCall ? 1 : 0, methodMatch: 0, eventMatch: 1, executionMatch: 0 },
-                reasons: [`Single ${movement.type} outgoing movement`]
+                type: TransactionType.TOKEN_TRANSFER,
+                confidence: 0.6,
+                breakdown: { tokenFlowMatch: 1.0, addressMatch: 0, methodMatch: 0, eventMatch: 1, executionMatch: 0 },
+                reasons: [`Single ERC20 outgoing movement`]
             };
         }
 
-        // 3. WETH Wrapping (Deposit)
-        // Native OUT + WETH IN.
-        if (BigInt(ctx.tx.value) > BigInt(0) && inCount === 1) {
-            const inMove = flow.incoming[0];
-            // If incoming is ERC20
-            if (inMove.type === 'ERC20') {
-                // Check if it's WETH-like? (Optional config check)
-                // Start with Swap/Interaction classification
-                return {
-                    type: TransactionType.SWAP,
-                    confidence: 0.8,
-                    breakdown: { tokenFlowMatch: 1.0, eventMatch: 0, methodMatch: 0, addressMatch: 0, executionMatch: 0 },
-                    reasons: ['Native Sent, Token Received (Wrap)']
-                };
-            }
+        // Incoming Transfer (User received)
+        if (allIn.length === 1 && allOut.length === 0 && erc20In.length === 1) {
+            return {
+                type: TransactionType.TOKEN_TRANSFER,
+                confidence: 0.6,
+                breakdown: { tokenFlowMatch: 1.0, addressMatch: 0, methodMatch: 0, eventMatch: 1, executionMatch: 0 },
+                reasons: [`Single ERC20 incoming movement`]
+            };
         }
 
-        // If no logic matched, return specific failure or throw if we expect validation in matches()
-        // TransferRule is broad, so matches() is loose. classify() might return null concept but interface requires RuleResult.
-        // We throw if we really don't match, caught by engine.
-        throw new Error("TransferRule matches() but failed semantic check");
+        // --- 3. NFT TRANSFER ---
+        // "Exactly one NFT moved. No correlated payment. No bridge/lending semantics (Assumed handled by Priority)"
+        const nftOut = flow.outgoing.filter(m => ['ERC721', 'ERC1155'].includes(m.type));
+        const nftIn = flow.incoming.filter(m => ['ERC721', 'ERC1155'].includes(m.type));
+
+        // Outgoing NFT
+        if (nftOut.length === 1 && allOut.length === 1 && allIn.length === 0) {
+            return {
+                type: TransactionType.NFT_TRANSFER,
+                confidence: 0.6,
+                breakdown: { tokenFlowMatch: 1.0, addressMatch: 0, methodMatch: 0, eventMatch: 1, executionMatch: 0 },
+                reasons: [`Single NFT outgoing movement`]
+            };
+        }
+
+        // Incoming NFT
+        if (nftIn.length === 1 && allIn.length === 1 && allOut.length === 0) {
+            return {
+                type: TransactionType.NFT_TRANSFER,
+                confidence: 0.6,
+                breakdown: { tokenFlowMatch: 1.0, addressMatch: 0, methodMatch: 0, eventMatch: 1, executionMatch: 0 },
+                reasons: [`Single NFT incoming movement`]
+            };
+        }
+
+        // If multiple assets or mixed directions (already caught), return null.
+        return null as any;
     }
 }
