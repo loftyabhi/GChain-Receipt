@@ -79,6 +79,7 @@ export default function Home() {
           } else if (jobData.state === 'completed') {
             clearInterval(pollInterval);
             setPdfUrl(jobData.pdfUrl); // Already includes /print/bill/...
+            setBillData(jobData.data);
             setLoading(false);
             trackTxLookup(chainId.toString(), 'success');
             toast.success("Documentation compiled successfully.", { id: toastId });

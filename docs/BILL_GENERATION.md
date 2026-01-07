@@ -22,7 +22,7 @@ The Bill Generation system has been migrated from a server-side Puppeteer archit
     2.  If missing, triggers **Soft Queue** Job (Idempotent).
     3.  **Soft Queue Worker**:
         *   Claims job atomically via DB RPC.
-        *   Fetches blockchain data (with concurrency limits).
+        *   Fetches Chain Receipt data (with concurrency limits).
         *   Constructs ViewModel.
         *   Uploads JSON to Storage (Cache).
     4.  Returns JSON to Frontend.

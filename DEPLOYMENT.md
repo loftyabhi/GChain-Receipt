@@ -17,6 +17,10 @@ The frontend is a Next.js application located in `apps/web`.
     NEXT_PUBLIC_API_URL=https://your-api.onrender.com
     NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=...
     
+    # Analytics & Privacy (New)
+    NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX
+    NEXT_PUBLIC_CONSENT_MODE=true
+    
     # Show Your Support System
     NEXT_PUBLIC_SUPPORT_VAULT_ADDRESS=0x...
     NEXT_PUBLIC_ADMIN_ADDRESS=0x...

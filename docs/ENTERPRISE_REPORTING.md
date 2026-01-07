@@ -1,7 +1,7 @@
-# Enterprise Reporting & GChain Semantic Classifier
+# Enterprise Reporting & Chain Receipt Semantic Classifier
 
 ## Overview
-This document outlines the interpretation, guarantees, and technical architecture of the GChain Receipt Enterprise PDF Reports and the underlying **GChain Semantic Classifier**.
+This document outlines the interpretation, guarantees, and technical architecture of the Chain Receipt Enterprise PDF Reports and the underlying **Chain Receipt Semantic Classifier**.
 
 ---
 
@@ -50,7 +50,7 @@ The report automatically flags potential risks:
 ## Part 2: Technical Architecture (The Engine)
 
 ### 1. Overview
-The **GChain Semantic Classifier** (formerly "Me Classifier") is the core component responsible for identifying the **semantic intent** of a blockchain transaction.
+The **Chain Receipt Semantic Classifier** (formerly "Me Classifier") is the core component responsible for identifying the **semantic intent** of a blockchain transaction.
 
 It is "Deterministic" because it follows a strict, repeatable pipeline:
 1.  **Resolution**: Determines *who* executed *what* (handling Proxies/Multisigs).

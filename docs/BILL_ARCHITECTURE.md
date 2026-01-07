@@ -35,7 +35,7 @@ The `SoftQueueService` replaces the traditional message queue. It uses a Postgre
 ## 3. Data Flow
 
 ### A. Submission (`POST /resolve`)
-1.  Frontend sends `txHash` + `chainId`.
+1.  Frontend sends `txHash` + `Chain ReceiptId`.
 2.  API checks `bills` table (Hard Idempotency) -> Returns immediately if done.
 3.  API calls `SoftQueueService.enqueue`.
 4.  DB `INSERT` into `bill_jobs` (Safe Idempotent Insert).
