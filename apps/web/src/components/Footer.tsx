@@ -167,13 +167,13 @@ export function Footer() {
                         &copy; {new Date().getFullYear()} Chain Receipt. All rights reserved.
                     </p>
                     <div className="flex items-center gap-6">
-                        <Link href="https://github.com/loftyabhi" className="text-gray-400 hover:text-violet-400 transition-colors transform hover:scale-110">
+                        <Link href="https://github.com/loftyabhi" aria-label="Visit GitHub Profile" className="text-gray-400 hover:text-violet-400 transition-colors transform hover:scale-110">
                             <GithubIcon className="w-5 h-5" />
                         </Link>
-                        <Link href="https://twitter.com/loftyabhi" className="text-gray-400 hover:text-violet-400 transition-colors transform hover:scale-110">
+                        <Link href="https://twitter.com/loftyabhi" aria-label="Visit Twitter Profile" className="text-gray-400 hover:text-violet-400 transition-colors transform hover:scale-110">
                             <TwitterIcon className="w-5 h-5" />
                         </Link>
-                        <Link href="https://t.me/loftyabhi" className="text-gray-400 hover:text-violet-400 transition-colors transform hover:scale-110">
+                        <Link href="https://t.me/loftyabhi" aria-label="Join Telegram Channel" className="text-gray-400 hover:text-violet-400 transition-colors transform hover:scale-110">
                             <TelegramIcon className="w-5 h-5" />
                         </Link>
                     </div>

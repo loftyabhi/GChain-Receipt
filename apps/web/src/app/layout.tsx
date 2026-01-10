@@ -73,6 +73,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="bg-[#0a0a0a] min-h-screen text-white antialiased selection:bg-violet-500/30 font-sans">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 z-[60] px-4 py-2 bg-violet-600 text-white font-bold rounded-lg shadow-lg outline-none focus:ring-2 focus:ring-white">
+          Skip to content
+        </a>
         <Providers>
           <script
             type="application/ld+json"

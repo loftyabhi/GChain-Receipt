@@ -113,7 +113,7 @@ export default function Home() {
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-purple-500/30 overflow-x-hidden">
       <Navbar />
 
-      <main className="relative pt-32 pb-20 px-6">
+      <main id="main-content" className="relative pt-32 pb-20 px-6">
         {/* Background Gradients */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
           <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-violet-600/20 rounded-full blur-[120px] opacity-50" />
@@ -161,7 +161,9 @@ export default function Home() {
 
               {/* Chain Selector */}
               <div className="pl-4 pr-2 border-r border-white/10 hidden md:block">
+                <label htmlFor="chain-select-desktop" className="sr-only">Select Chain</label>
                 <select
+                  id="chain-select-desktop"
                   value={chainId}
                   onChange={(e) => handleChainChange(Number(e.target.value))}
                   className="bg-transparent text-white outline-none border-none font-medium cursor-pointer appearance-none text-sm uppercase tracking-wide [&>option]:bg-zinc-900"
@@ -180,7 +182,9 @@ export default function Home() {
               <div className="pl-2 text-zinc-500">
                 <Search size={20} />
               </div>
+              <label htmlFor="tx-hash-input" className="sr-only">Transaction Hash</label>
               <input
+                id="tx-hash-input"
                 type="text"
                 placeholder="Enter Transaction Hash for Verification (0x...)"
                 className="flex-1 bg-transparent px-2 py-4 text-base md:text-lg outline-none placeholder:text-zinc-600 text-white w-full min-w-0"
@@ -191,6 +195,7 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={loading}
+                aria-label={loading ? 'Processing transaction' : 'Generate Bill'}
                 className="flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 font-semibold text-white transition-all active:scale-95 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-600/20 whitespace-nowrap"
               >
                 {loading ? <Loader2 className="animate-spin" size={20} /> : <ArrowRight size={20} />}
@@ -200,7 +205,9 @@ export default function Home() {
 
             {/* Mobile Chain Selector Fallback */}
             <div className="mt-4 md:hidden flex justify-center">
+              <label htmlFor="chain-select-mobile" className="sr-only">Select Chain</label>
               <select
+                id="chain-select-mobile"
                 value={chainId}
                 onChange={(e) => handleChainChange(Number(e.target.value))}
                 className="bg-white/5 text-white outline-none border border-white/10 rounded-lg px-4 py-2 font-medium cursor-pointer text-sm uppercase tracking-wide [&>option]:bg-zinc-900"
