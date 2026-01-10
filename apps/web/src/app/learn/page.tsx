@@ -3,10 +3,20 @@ import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
 import { BookOpen, Database, EthernetPort, FileText, Layers, ShieldCheck, Network, Gavel, Zap, Box, Hammer, Coins, Scale } from 'lucide-react';
 
+import { constructCanonical, generateBreadcrumbSchema } from '@/lib/seo';
+
 export const metadata: Metadata = {
-    title: 'Learn Blockchain Fundamentals | Chain Receipt',
+    title: 'Learn Blockchain Fundamentals',
     description: 'A neutral, technical reference for understanding blockchain, EVM, and transaction mechanics. No hype, just documentation.',
+    alternates: {
+        canonical: constructCanonical('/learn'),
+    },
 };
+
+const breadcrumbs = [
+    { name: 'Home', item: '/' },
+    { name: 'Learn', item: '/learn' },
+];
 
 const topics = [
     {
@@ -104,6 +114,10 @@ const topics = [
 export default function LearnHub() {
     return (
         <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-violet-500/30 overflow-x-hidden">
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(generateBreadcrumbSchema(breadcrumbs)) }}
+            />
             <Navbar />
 
             {/* Background Gradients */}

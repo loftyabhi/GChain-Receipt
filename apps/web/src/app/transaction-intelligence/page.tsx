@@ -3,14 +3,38 @@ import Link from 'next/link';
 
 import { Navbar } from '@/components/Navbar';
 
+import { constructCanonical, generateBreadcrumbSchema, generateFAQSchema } from '@/lib/seo';
+
 export const metadata: Metadata = {
-    title: 'Transaction Intelligence | Chain Receipt',
+    title: 'Transaction Intelligence',
     description: 'Enterprise-grade blockchain transaction intelligence. Privacy-first, deterministic analysis for compliance, accounting, and audit workflows.',
+    alternates: {
+        canonical: constructCanonical('/transaction-intelligence'),
+    },
 };
+
+const breadcrumbs = [
+    { name: 'Home', item: '/' },
+    { name: 'Transaction Intelligence', item: '/transaction-intelligence' },
+];
+
+const faqs = [
+    { question: 'Can I use these reports for tax filing?', answer: 'These receipts serve as detailed transaction documentation (Section 404/compliance support) but do not replace professional tax advice or official exchange statements.' },
+    { question: 'Is my wallet address stored?', answer: 'No. Chain Receipt performs analysis on-demand (client-side and state-less API) and does not maintain a database of user transaction histories or PII.' },
+    { question: 'What happens if the API is down?', answer: 'Since our analysis is deterministic and based on public blockchain data, any transaction can be re-analyzed at any time to generate the exact same receipt, ensuring redundancy.' },
+];
 
 export default function TransactionIntelligence() {
     return (
         <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-violet-500/30 overflow-x-hidden">
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(generateBreadcrumbSchema(breadcrumbs)) }}
+            />
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(generateFAQSchema(faqs)) }}
+            />
             <Navbar />
 
             {/* Background Gradients */}

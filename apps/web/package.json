@@ -6,7 +6,8 @@
     "dev": "cross-env NODE_OPTIONS=--no-deprecation next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:seo": "node scripts/verify-seo.mjs"
   },
   "dependencies": {
     "@metamask/sdk": "^0.34.0",

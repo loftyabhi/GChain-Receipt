@@ -3,14 +3,51 @@ import Link from 'next/link';
 
 import { Navbar } from '@/components/Navbar';
 
+import { constructCanonical, generateBreadcrumbSchema, generateArticleSchema, generateFAQSchema } from '@/lib/seo';
+
 export const metadata: Metadata = {
-    title: 'How to Read a Blockchain Transaction | Chain Receipt',
+    title: 'How to Read a Blockchain Transaction',
     description: 'Learn how to interpret blockchain transaction hashes. Understand semantic classification, input data decoding, and confidence scoring for audit-grade reporting.',
+    alternates: {
+        canonical: constructCanonical('/how-to-read-blockchain-transaction'),
+    },
 };
+
+const breadcrumbs = [
+    { name: 'Home', item: '/' },
+    { name: 'How to Read Transactions', item: '/how-to-read-blockchain-transaction' },
+];
+
+const faqs = [
+    { question: "Why doesn't the hash show everything?", answer: "A hash only identifies the event location. Depending on smart contract logic, a single hash can trigger dozens of internal transfers not visible in top-level input data." },
+    { question: "How is the Confidence Score calculated?", answer: "It is determined deterministically by comparing event logs against known ABI standards versus generic heuristic patterns." },
+    { question: "Is this legally binding?", answer: "No. These are interpretive summaries of public data for compliance workflows, not a substitute for legal counsel." }
+];
 
 export default function HowToReadTransaction() {
     return (
         <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-violet-500/30 overflow-x-hidden">
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(generateBreadcrumbSchema(breadcrumbs)) }}
+            />
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{
+                    __html: JSON.stringify(generateArticleSchema(
+                        'How to Read a Blockchain Transaction',
+                        'Learn how to transform hexadecimal hashes into human-readable, audit-grade intelligence.',
+                        '2024-01-01', // Static date for now, or dynamic if preferred
+                        '2024-01-01',
+                        '/og-how-to.png', // Placeholder, or real image path
+                        'Educational'
+                    ))
+                }}
+            />
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(generateFAQSchema(faqs)) }}
+            />
             <Navbar />
 
             {/* Background Gradients */}

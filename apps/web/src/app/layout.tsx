@@ -7,6 +7,7 @@ import { Footer } from '@/components/Footer';
 import { GoogleAnalytics } from '@/components/analytics/GoogleAnalytics';
 import { ConsentBanner } from '@/components/analytics/ConsentBanner';
 import { ShareAttribution } from '@/components/analytics/ShareAttribution';
+import { generateOrganizationSchema, generateWebSiteSchema, constructCanonical } from '@/lib/seo';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -60,7 +61,7 @@ export const metadata: Metadata = {
     ],
   },
   alternates: {
-    canonical: './',
+    canonical: constructCanonical('/'),
   },
 };
 
@@ -73,6 +74,14 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="bg-[#0a0a0a] min-h-screen text-white antialiased selection:bg-violet-500/30 font-sans">
         <Providers>
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(generateOrganizationSchema()) }}
+          />
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(generateWebSiteSchema()) }}
+          />
           <GoogleAnalytics />
           <ConsentBanner />
           <Suspense fallback={null}>

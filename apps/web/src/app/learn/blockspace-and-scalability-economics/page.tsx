@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { ArrowLeft, Box, Zap, Server, Layers, BarChart3, Lock, Scale, Network } from 'lucide-react';
 
 export const metadata: Metadata = {
-    title: 'Blockspace & Scalability Economics | Chain Receipt',
+    title: 'Blockspace & Scalability Economics',
     description: 'Understanding the scarce resource of blockspace, the economics of gas fees, and the necessity of Layer 2 scaling.',
     openGraph: {
         title: 'Blockspace Economics | Chain Receipt Learning',

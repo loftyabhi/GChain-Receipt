@@ -1,9 +1,28 @@
+import { Metadata } from 'next';
 import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
+import { constructCanonical, generateBreadcrumbSchema } from '@/lib/seo';
+
+export const metadata: Metadata = {
+    title: 'Privacy Policy',
+    description: 'Chain Receipt is committed to deterministic, privacy-first blockchain intelligence. We do not collect PII or private keys.',
+    alternates: {
+        canonical: constructCanonical('/privacy-policy'),
+    },
+};
+
+const breadcrumbs = [
+    { name: 'Home', item: '/' },
+    { name: 'Privacy Policy', item: '/privacy-policy' },
+];
 
 export default function PrivacyPolicy() {
     return (
         <div className="min-h-screen bg-[#0a0a0a] text-zinc-300 font-sans selection:bg-violet-500/30 overflow-x-hidden">
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(generateBreadcrumbSchema(breadcrumbs)) }}
+            />
             <Navbar />
 
             {/* Background Gradients */}
