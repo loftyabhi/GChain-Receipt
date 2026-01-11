@@ -42,8 +42,12 @@ export default function BillPrintClient() {
         fetchData();
     }, [billId]);
 
-    // Metadata is now handled by the server component wrapper.
-    // Removed document.title effect.
+    // Set document title for PDF filename to match URL ID
+    useEffect(() => {
+        if (billId) {
+            document.title = `Chain Receipt - ${billId}`;
+        }
+    }, [billId]);
 
     useEffect(() => {
         if (!data || loading || isPreview) return; // Skip print in preview mode
