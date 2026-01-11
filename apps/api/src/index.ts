@@ -69,13 +69,11 @@ app.get('/bills/:fileName', async (req: Request, res: Response) => {
 // New Endpoint: Get Bill JSON Data (For Client-Side Rendering)
 app.get('/api/v1/bills/:billId/data', async (req: Request, res: Response) => {
     const { billId } = req.params;
-    // Append .json if not present, though usually ID implies base name.
-    // The ID format is BILL-...
-    // Storage keys are BILL-....json
     const jsonKey = billId.endsWith('.json') ? billId : `${billId}.json`;
+    const cleanId = billId.replace('.json', '');
 
     try {
-        // 1. Try fetching from Supabase Storage directly
+        // 1. Storage Check
         const { data, error } = await supabase.storage
             .from('receipts')
             .download(jsonKey);
@@ -86,29 +84,69 @@ app.get('/api/v1/bills/:billId/data', async (req: Request, res: Response) => {
             return;
         }
 
-        // 2. If missing, try regeneration (Self-Healing)
-        console.log(`[API] JSON ${jsonKey} missing. Triggering self-healing...`);
+        console.log(`[API] Storage miss for ${jsonKey}. Starting DB Fallback...`);
+
+        // 2. DB Fallback
+        const parts = cleanId.split('-');
+        // Expect: BILL-{chainId}-{blockNumber}-{shortHash}
+        // Example: BILL-8453-123456-0xb65f
+        // Allow case-insensitive prefix check
+        if (parts.length >= 4 && parts[0].toUpperCase() === 'BILL') {
+            const chainId = parseInt(parts[1]);
+            const shortHash = parts[3];
+
+            if (!isNaN(chainId) && shortHash) {
+                // Query DB
+                const { data: dbBill, error: dbError } = await supabase
+                    .from('bills')
+                    .select('bill_json')
+                    .eq('chain_id', chainId)
+                    .ilike('tx_hash', `${shortHash}%`)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (dbBill && dbBill.bill_json) {
+                    console.log(`[API] DB Fallback Hit! Serving JSON.`);
+                    res.json(dbBill.bill_json);
+
+                    // 3. Cache Repair
+                    (async () => {
+                        try {
+                            const jsonBuffer = Buffer.from(JSON.stringify(dbBill.bill_json));
+                            await supabase.storage
+                                .from('receipts')
+                                .upload(jsonKey, jsonBuffer, {
+                                    contentType: 'application/json',
+                                    upsert: true
+                                });
+                            console.log(`[API] Cache repaired.`);
+                        } catch (e: any) {
+                            console.warn(`[API] Cache repair failed: ${e.message}`);
+                        }
+                    })();
+                    return;
+                }
+            }
+        }
+
+        // 3. Regen Fallback
+        console.log(`[API] Falling back to Regen...`);
         try {
-            // regenerateFromId returns the PDF path, but it generates the JSON as side effect
-            await billService.regenerateFromId(jsonKey.replace('.json', ''));
-
-            // Try downloading again
-            const { data: retryData } = await supabase.storage
-                .from('receipts')
-                .download(jsonKey);
-
+            await billService.regenerateFromId(cleanId);
+            const { data: retryData } = await supabase.storage.from('receipts').download(jsonKey);
             if (retryData) {
+                console.log(`[API] Regen success.`);
                 const text = await retryData.text();
                 res.json(JSON.parse(text));
                 return;
             }
         } catch (regenError: any) {
-            console.error(`[API] Self-healing failed: ${regenError.message}`);
+            console.error(`[API] Regen failed: ${regenError.message}`);
         }
 
         res.status(404).json({ error: 'Bill data not found' });
 
-    } catch (error) {
+    } catch (error: any) {
         console.error('[API] Error fetching bill data:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
