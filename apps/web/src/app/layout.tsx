@@ -7,17 +7,24 @@ import { Footer } from '@/components/Footer';
 import { GoogleAnalytics } from '@/components/analytics/GoogleAnalytics';
 import { ConsentBanner } from '@/components/analytics/ConsentBanner';
 import { ShareAttribution } from '@/components/analytics/ShareAttribution';
+import { RealUserMonitoring } from '@/components/analytics/RealUserMonitoring';
 import { generateOrganizationSchema, generateWebSiteSchema, constructCanonical } from '@/lib/seo';
 
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
+  display: 'swap',
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   variable: '--font-jetbrains-mono',
+  display: 'swap', // [Enterprise] Ensure swap to avoid invisible text
+  preload: true, // [Enterprise] Preload critical LCP font
 });
+
+// [Enterprise] Strict Preloading: Only LCP assets (Fonts in this case)
+// No random preloads for non-critical scripts
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://chainreceipt.vercel.app'),
@@ -90,6 +97,7 @@ export default function RootLayout({
           <Suspense fallback={null}>
             <ShareAttribution />
           </Suspense>
+          <RealUserMonitoring /> {/* [Enterprise] RUM */}
           {children}
           <Footer />
         </Providers>

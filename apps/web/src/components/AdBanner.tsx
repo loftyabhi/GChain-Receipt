@@ -1,12 +1,20 @@
 'use client';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import Image from 'next/image'; // [NEW]
 import { ExternalLink } from 'lucide-react';
 
 interface Ad {
     id: string;
     contentHtml: string;
     clickUrl?: string;
+    imageUrl?: string; // [NEW] Added optional field if API supports it, or we extract
+}
+
+// Helper to extract src from an img tag string
+function extractImgSrc(html: string): string | null {
+    const match = html.match(/src=["'](.*?)["']/);
+    return match ? match[1] : null;
 }
 
 export default function AdBanner() {
@@ -20,7 +28,11 @@ export default function AdBanner() {
             .catch(err => console.error("Failed to fetch ad", err));
     }, []);
 
-    if (!ad) return null;
+    // Reserve space even if no ad to prevent CLS
+    if (!ad) return <div className="w-full h-[90px] my-8 bg-white/5 rounded-xl border border-dashed border-white/10" aria-hidden="true" />;
+
+    // Extract image Source
+    const imgSrc = ad.imageUrl || extractImgSrc(ad.contentHtml);
 
     return (
         <div className="w-full flex justify-center my-8">
@@ -34,13 +46,31 @@ export default function AdBanner() {
                 <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm shadow-2xl hover:shadow-purple-500/10 transition-all duration-500 h-full">
 
                     {/* Clickable Area */}
-                    <a href={ad.clickUrl || '#'} target="_blank" rel="noopener noreferrer" className="block relative z-10 h-full">
-
-                        {/* Ad Content */}
-                        <div
-                            dangerouslySetInnerHTML={{ __html: ad.contentHtml }}
-                            className="h-full w-full [&_img]:w-full [&_img]:h-full [&_img]:object-cover [&_iframe]:!w-full [&_iframe]:!h-[90px] [&_iframe]:border-none flex items-center justify-center"
-                        />
+                    <a href={ad.clickUrl || '#'} target="_blank" rel="noopener noreferrer" className="block relative z-10 h-full w-full">
+                        {imgSrc ? (
+                            <Image
+                                src={imgSrc}
+                                alt="Sponsored Content"
+                                fill
+                                sizes="(max-width: 768px) 100vw, 728px"
+                                className="object-cover"
+                                loading="lazy" // Below fold usually
+                                quality={80}
+                            />
+                        ) : (
+                            // [Enterprise] Fallback: Isolate HTML content in iframe to prevent style leakage/XSS risk
+                            <div className="h-full w-full bg-black/60 flex items-center justify-center">
+                                {/* If the ad is purely HTML/Text, sandbox it properly. 
+                                   Using iframe for strict isolation. */}
+                                <iframe
+                                    srcDoc={`<style>body{margin:0;overflow:hidden;background:transparent;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;}</style>${ad.contentHtml}`}
+                                    title="Ad Content"
+                                    className="w-full h-full border-none pointer-events-none"
+                                    sandbox="allow-scripts"
+                                    loading="lazy"
+                                />
+                            </div>
+                        )}
                     </a>
 
                     {/* Hover Overlay Effect */}
