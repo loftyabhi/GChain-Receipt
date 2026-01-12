@@ -6,25 +6,13 @@ const nextConfig = {
     images: {
         remotePatterns: [
             {
-                protocol: 'https',
-                hostname: '*.a-ads.com',
-            },
-            {
-                protocol: 'https',
-                hostname: '*.aads.com', // [Enterprise] Add alternative domain
-            },
-            {
-                protocol: 'https',
-                hostname: '*.ad-maven.com',
-            },
-            {
-                // [Enterprise] Whitelist Supabase Storage for custom ads
+                // [Enterprise] Whitelist Supabase Storage for custom ads (internal assets)
                 protocol: 'https',
                 hostname: '*.supabase.co',
             },
             {
                 protocol: 'https',
-                hostname: '*.supabase.in',
+                hostname: '*.supabase.in', // Fallback region
             },
         ],
     },

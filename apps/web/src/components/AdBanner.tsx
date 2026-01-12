@@ -1,7 +1,6 @@
-'use client';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import Image from 'next/image'; // [NEW]
+// import Image from 'next/image'; // Removed for AdBanner to avoid proxy issues
 import { ExternalLink } from 'lucide-react';
 
 interface Ad {
@@ -55,14 +54,15 @@ export default function AdBanner() {
                     {/* Clickable Area */}
                     <a href={ad.clickUrl || '#'} target="_blank" rel="noopener noreferrer" className="block relative z-10 h-full w-full">
                         {imgSrc ? (
-                            <Image
+                            // [Enterprise] Use plain <img> for third-party ads to avoid Next.js Proxy/CORS/400 errors
+                            // Strict layout protection (h-full/w-full object-contain) prevents CLS
+                            <img
                                 src={imgSrc}
                                 alt="Sponsored Content"
-                                fill
-                                sizes="(max-width: 768px) 100vw, 728px"
-                                className="object-cover"
-                                loading="lazy" // Below fold usually
-                                quality={80}
+                                loading="lazy"
+                                decoding="async"
+                                referrerPolicy="no-referrer"
+                                className="h-full w-full object-contain"
                             />
                         ) : (
                             // [Enterprise] Fallback: Isolate HTML content in iframe to prevent style leakage/XSS risk
