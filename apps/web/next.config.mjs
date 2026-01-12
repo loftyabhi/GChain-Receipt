@@ -3,6 +3,18 @@ const withBundleAnalyzer = process.env.ANALYZE === 'true'
     : (config) => config;
 
 const nextConfig = {
+    images: {
+        remotePatterns: [
+            {
+                protocol: 'https',
+                hostname: '*.a-ads.com',
+            },
+            {
+                protocol: 'https',
+                hostname: '*.ad-maven.com', // Potential other provider
+            },
+        ],
+    },
     env: {
         ADMIN_ADDRESS: process.env.ADMIN_ADDRESS,
     },
@@ -13,7 +25,7 @@ const nextConfig = {
                 source: '/(.*)',
                 headers: [
                     { key: 'X-Content-Type-Options', value: 'nosniff' },
-                    { key: 'X-Frame-Options', value: 'DENY' },
+                    { key: 'X-Frame-Options', value: 'SAMEORIGIN' }, // Relaxed from DENY to allow safe framing
                     { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
                 ],
             },
