@@ -34,8 +34,18 @@ export default function AdBanner() {
             .catch(err => console.error("Failed to fetch ad", err));
     }, []);
 
-    // Reserve space even if no ad to prevent CLS
-    if (!ad) return <div className="w-full h-[90px] my-8 bg-white/5 rounded-xl border border-dashed border-white/10" aria-hidden="true" />;
+    // Fallback: Show a-ads if no ad is returned from backend
+    if (!ad) {
+        return (
+            <div id="frame" style={{ width: '100%', margin: 'auto', position: 'relative', zIndex: 99998 }}>
+                <iframe
+                    data-aa='2423044'
+                    src='//acceptable.a-ads.com/2423044/?size=Adaptive'
+                    style={{ border: 0, padding: 0, width: '70%', height: 'auto', overflow: 'hidden', display: 'block', margin: 'auto' }}
+                />
+            </div>
+        );
+    }
 
     // Extract image Source
     const imgSrc = ad.imageUrl || extractImgSrc(ad.contentHtml);
