@@ -60,11 +60,11 @@ const nextConfig = {
         return [
             {
                 source: '/docs',
-                destination: 'http://localhost:3002/docs',
+                destination: `${process.env.DOCS_URL || 'http://localhost:3002'}/docs`,
             },
             {
                 source: '/docs/:path*',
-                destination: 'http://localhost:3002/docs/:path*',
+                destination: `${process.env.DOCS_URL || 'http://localhost:3002'}/docs/:path*`,
             },
         ]
     },
