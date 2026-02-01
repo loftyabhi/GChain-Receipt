@@ -676,7 +676,7 @@ export default function DashboardPage() {
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Plan</label>
-                                            <select value={keyFormData.planName} onChange={e => setKeyFormData({ ...keyFormData, planName: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500 outline-none">
+                                            <select value={keyFormData.planName} onChange={e => setKeyFormData({ ...keyFormData, planName: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500 outline-none [&>option]:bg-zinc-900">
                                                 <option value="Free">Free</option>
                                                 <option value="Pro">Pro</option>
                                                 <option value="Enterprise">Enterprise</option>
