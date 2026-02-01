@@ -19,6 +19,7 @@ const port = process.env.PORT || 3001;
 
 const allowedOrigins = [
     'https://txproof.xyz',
+    'https://www.txproof.xyz',
     'https://api.txproof.xyz', // Playground
     'http://localhost:3000',
     'http://localhost:3001'
@@ -36,17 +37,28 @@ app.use(cors({
     credentials: true
 }));
 
-// Host Header Guard to protect backend.txproof.xyz (Internal Only)
+// Host Header Guard to protect backend.txproof.xyz
+// Goal: Allow 'txproof.xyz' frontend to use it, but block other browsers/public users.
 app.use((req: Request, res: Response, next: NextFunction) => {
     const host = req.get('host');
+
+    // Strict rules for the Private Backend Domain
     if (host === 'backend.txproof.xyz') {
         const origin = req.get('origin');
-        // Retrieve internal secret from header or strictly block browsers (Origin present)
-        // If Origin is present, it's likely a browser.
+
+        // If request comes from a browser (has Origin)
         if (origin) {
-            res.status(403).json({ error: 'Direct browser access to backend interface is forbidden.' });
-            return;
+            // ONLY Allow the official frontend
+            const isAllowedFrontend = origin === 'https://txproof.xyz' || origin === 'https://www.txproof.xyz';
+
+            if (!isAllowedFrontend) {
+                // Block random sites / users trying to hit backend directly
+                res.status(403).json({ error: 'Direct browser access forbidden. Use https://txproof.xyz' });
+                return;
+            }
+            // If it IS the allowed frontend, pass through.
         }
+        // If No Origin (Server-to-Server / Curl / Mobile App), pass through (assumes API Key/Auth layers handle security)
     }
     next();
 });
