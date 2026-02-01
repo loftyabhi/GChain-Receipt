@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 export default function QuickStart() {
     const jsExample = `
 // 1. Submit Receipt Request
-const res = await fetch('https://api.chainreceipt.com/api/v1/bills/resolve', {
+const res = await fetch('https://api.txproof.xyz/api/v1/bills/resolve', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -19,7 +19,7 @@ console.log("Job Started:", jobId);
 
 // 2. Poll for Status
 const poll = async (id) => {
-  const statusRes = await fetch(\`https://api.chainreceipt.com/api/v1/bills/job/\${id}\`);
+  const statusRes = await fetch(\`https://api.txproof.xyz/api/v1/bills/job/\${id}\`);
   const data = await statusRes.json();
   
   if (data.status === 'completed') {
@@ -39,14 +39,14 @@ poll(jobId);
 
     const curlExample = `
 # 1. Start Job
-curl -X POST https://api.chainreceipt.com/api/v1/bills/resolve \\
+curl -X POST https://api.txproof.xyz/api/v1/bills/resolve \\
   -H "Content-Type: application/json" \\
   -d '{"txHash": "0xc75...", "chainId": 1}'
 
 # Response: { "jobId": "job_123", "status": "pending" }
 
 # 2. Poll Status (Repeat until completed)
-curl https://api.chainreceipt.com/api/v1/bills/job/job_123
+curl https://api.txproof.xyz/api/v1/bills/job/job_123
 
 # Response (Completed):
 # {

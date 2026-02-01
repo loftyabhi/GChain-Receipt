@@ -41,11 +41,11 @@ export function generateOrganizationSchema() {
         logo: `${DOMAIN}/logo.png`, // Assuming logo exists, or standard OG image if not
         sameAs: [
             // Add social profiles here if available
-            // 'https://twitter.com/chainreceipt',
+            // 'https://twitter.com/loftyabhi',
         ],
         contactPoint: {
             '@type': 'ContactPoint',
-            email: 'support@chainreceipt.com', // Placeholder if not provided
+            email: 'support@txproof.xyz', // Placeholder if not provided
             contactType: 'customer support',
         },
     };
