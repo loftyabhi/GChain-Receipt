@@ -56,15 +56,17 @@ const nextConfig = {
             exclude: ['error', 'warn'],
         } : false,
     },
-    async rewrites() {
+    async redirects() {
         return [
             {
                 source: '/docs',
-                destination: `${process.env.DOCS_URL || 'http://localhost:3002'}/docs`,
+                destination: 'https://docs.txproof.xyz',
+                permanent: true,
             },
             {
                 source: '/docs/:path*',
-                destination: `${process.env.DOCS_URL || 'http://localhost:3002'}/docs/:path*`,
+                destination: 'https://docs.txproof.xyz/:path*',
+                permanent: true,
             },
         ]
     },

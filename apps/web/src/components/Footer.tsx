@@ -100,7 +100,7 @@ export function Footer() {
                                 </Link>
                             </li>
                             <li>
-                                <Link href="/docs" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                <a href="https://docs.txproof.xyz" target="_blank" rel="noopener noreferrer" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
                                     Developer API
                                 </Link>
                             </li>
