@@ -18,9 +18,18 @@ import { strictRateLimiter } from './publicRateLimiter';
  */
 export const hybridAuth = (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
-    const hasApiKey = authHeader?.startsWith('Bearer sk_');
 
-    if (hasApiKey) {
+    // AGGRESSIVE CHECK:
+    // If they send ANY Authorization header that looks like it might be an API key,
+    // we force them through the SaaS governance layer.
+    // This prevents "downgrade attacks" where a user sends a malformed header
+    // (e.g. missing 'Bearer ') to slip into the public tier (which ignores bans).
+    const isAuthAttempt = authHeader && (
+        authHeader.toLowerCase().includes('bearer') ||
+        authHeader.includes('sk_')
+    );
+
+    if (isAuthAttempt) {
         // Full SaaS Governance Path
         return saasMiddleware(req, res, next);
     } else {
@@ -42,9 +51,13 @@ export interface HybridRequest extends Request {
  */
 export const hybridAuthWithTracking = (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
-    const hasApiKey = authHeader?.startsWith('Bearer sk_');
 
-    if (hasApiKey) {
+    const isAuthAttempt = authHeader && (
+        authHeader.toLowerCase().includes('bearer') ||
+        authHeader.includes('sk_')
+    );
+
+    if (isAuthAttempt) {
         (req as HybridRequest).isPublicRequest = false;
         return saasMiddleware(req, res, next);
     } else {
