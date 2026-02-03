@@ -23,7 +23,6 @@
     "isomorphic-dompurify": "^2.16.0",
     "jsonwebtoken": "^9.0.2",
     "qrcode": "^1.5.3",
-    "puppeteer": "^21.6.0",
     "winston": "^3.11.0",
     "zod": "^3.22.4"
   },
@@ -35,6 +34,6 @@
     "@types/node": "^20.10.5",
     "@types/qrcode": "^1.5.5",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
+    "typescript": "5.3.3"
   }
 }

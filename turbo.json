@@ -8,8 +8,7 @@
             "outputs": [
                 "dist/**",
                 ".next/**",
-                "!.next/cache/**",
-                "api/dist/**"
+                "!.next/cache/**"
             ]
         },
         "lint": {
