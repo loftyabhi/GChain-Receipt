@@ -45,7 +45,7 @@ The backend is a Node.js/Express application located in `apps/api`.
     -   *Reason*: Render needs to see the root `package.json` to install workspace dependencies (`packages/*`).
 -   **Build Command**:
     ```bash
-    npm install -w @txproof/api --include-workspace-root --no-audit --no-fund && npm run build -- --filter=@txproof/api
+    npm install -w @txproof/api --include-workspace-root --include=dev --no-audit --no-fund && npm run build -- --filter=@txproof/api
     ```
 -   **Start Command**:
     ```bash
