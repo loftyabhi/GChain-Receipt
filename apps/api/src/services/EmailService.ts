@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../lib/logger';
@@ -16,30 +16,35 @@ export interface IEmailProvider {
     send(mailOptions: IEmailOptions): Promise<void>;
 }
 
-export class NodemailerProvider implements IEmailProvider {
-    private transporter: nodemailer.Transporter;
+export class ResendProvider implements IEmailProvider {
+    private resend: Resend;
 
     constructor() {
-        this.transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.GMAIL_USER,
-                pass: process.env.GMAIL_PASS
-            },
-            // Enterprise: Conservative timeouts to prevent hanging connections (Matching apps/web)
-            connectionTimeout: 10000,
-            greetingTimeout: 5000,
-            socketTimeout: 10000,
-        });
+        this.resend = new Resend(process.env.RESEND_API_KEY);
     }
 
     async send(mailOptions: IEmailOptions) {
-        await this.transporter.sendMail(mailOptions);
+        try {
+            const { data, error } = await this.resend.emails.send({
+                from: mailOptions.from,
+                to: mailOptions.to,
+                subject: mailOptions.subject,
+                html: mailOptions.html,
+                text: mailOptions.text
+            });
+
+            if (error) {
+                throw new Error(`Resend Error: ${error.message}`);
+            }
+        } catch (err) {
+            // Normalize error for the classifyError method if possible, or just let it bubble
+            throw err;
+        }
     }
 }
 
 export class EmailService {
-    constructor(private provider: IEmailProvider = new NodemailerProvider()) { }
+    constructor(private provider: IEmailProvider = new ResendProvider()) { }
 
     private getBaseTemplate(): { html: string; text: string } {
         const templatesDir = path.join(__dirname, 'email/templates');
