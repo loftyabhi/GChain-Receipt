@@ -53,7 +53,9 @@ app.use(cors({
         if (allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            // Log the rejected origin for debugging
+            logger.error(`CORS Blocked Origin: ${origin}`, { origin });
+            callback(new Error(`Not allowed by CORS: ${origin}`));
         }
     },
     credentials: true
