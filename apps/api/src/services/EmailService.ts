@@ -21,17 +21,15 @@ export class NodemailerProvider implements IEmailProvider {
 
     constructor() {
         this.transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465, // Implicit TLS
-            secure: true,
+            service: 'gmail',
             auth: {
                 user: process.env.GMAIL_USER,
                 pass: process.env.GMAIL_PASS
             },
-            // Aggressive Fail-Fast Timeouts
-            connectionTimeout: 10000, // 10s wait for connection
-            greetingTimeout: 5000,    // 5s wait for greeting
-            socketTimeout: 20000      // 20s inactive socket
+            // Enterprise: Conservative timeouts to prevent hanging connections (Matching apps/web)
+            connectionTimeout: 10000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
         });
     }
 
