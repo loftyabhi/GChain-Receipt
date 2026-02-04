@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { AuthService } from '../../services/AuthService';
 import { ApiKeyService } from '../../services/ApiKeyService';
 import { EmailService } from '../../services/EmailService';
+import { EmailQueueService } from '../../services/EmailQueueService';
 import { AuditService } from '../../services/AuditService';
 import { logger } from '../../lib/logger';
 import { z } from 'zod';
@@ -182,7 +183,7 @@ router.get('/keys', verifyUser, async (req: Request, res: Response) => {
         // Doing separate for simplicity
         const keysWithUsage = await Promise.all(keys.map(async (k: any) => {
             const { data: agg } = await supabase
-                .from('api_usage_aggregates')
+                .from('usage_aggregates')
                 .select('request_count')
                 .eq('api_key_id', k.id)
                 .eq('period_start', new Date().toISOString().slice(0, 7) + '-01')
@@ -284,7 +285,7 @@ router.get('/usage', verifyUser, async (req: Request, res: Response) => {
 
         // Get aggregate usage for these keys
         const { data: logs } = await supabase
-            .from('api_usage')
+            .from('usage_events')
             .select('created_at, status_code')
             .in('api_key_id', keyIds)
             .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // Last 30 days
@@ -343,6 +344,19 @@ router.post('/verify/request', verifyUser, strictRateLimiter, async (req: Reques
         if (user?.is_email_verified) return res.status(400).json({ error: 'Email already verified' });
         if (!user.email) return res.status(400).json({ error: 'No email address on profile' });
 
+        // 1.1 Check if this email is already verified by another user (Abuse Prevention)
+        const { data: duplicateUser } = await supabase
+            .from('users')
+            .select('id')
+            .ilike('email', user.email)
+            .eq('is_email_verified', true)
+            .neq('id', userId)
+            .maybeSingle();
+
+        if (duplicateUser) {
+            return res.status(400).json({ error: 'This email is already linked to another verified account.' });
+        }
+
         // 2. Check Rate Limit (once per 24 hours per user)
         const { data: existingToken } = await supabase
             .from('email_verification_tokens')
@@ -398,8 +412,31 @@ router.post('/verify/request', verifyUser, strictRateLimiter, async (req: Reques
             ip: userIp
         });
 
-        // 7. Send Email (Send raw token, store only hash)
-        await emailService.sendVerificationEmail(user.email, token);
+        // 7. Enqueue Email Job (Async & Reliable)
+        // Fetch verification template
+        const { data: template } = await supabase
+            .from('email_templates')
+            .select('id')
+            .eq('name', 'admin-verification')
+            .single();
+
+        if (!template) throw new Error('Verification template configuration missing');
+
+        const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify?token=${token}`;
+
+        // Use EmailQueueService for reliable delivery
+        // Note: Transactional emails bypass the 'verified user' check
+        const emailQueueService = new EmailQueueService();
+        await emailQueueService.enqueueJob({
+            recipientEmail: user.email,
+            category: 'transactional',
+            templateId: template.id,
+            priority: 'high',
+            metadata: {
+                verifyUrl,
+                expiryMinutes: '15'
+            }
+        });
 
         res.json({ success: true, message: 'Verification email sent. Valid for 15 minutes.' });
     } catch (e: any) {
@@ -447,6 +484,31 @@ router.post('/verify/:token', async (req: Request, res: Response) => {
             // Clean up token anyway
             await supabase.from('email_verification_tokens').delete().eq('token_hash', incomingHash);
             return res.json({ success: true, message: 'Email already verified' });
+        }
+
+        // 3.1 Fetch the email to be verified (from the user record)
+        const { data: userWithEmail } = await supabase
+            .from('users')
+            .select('email')
+            .eq('id', tokenData.user_id)
+            .single();
+
+        if (!userWithEmail?.email) {
+            return res.status(400).json({ error: 'No email address found for this user.' });
+        }
+
+        // 3.2 Final Uniqueness Check before update (Race Condition Prevention UX)
+        const { data: finalCheck } = await supabase
+            .from('users')
+            .select('id')
+            .ilike('email', userWithEmail.email)
+            .eq('is_email_verified', true)
+            .maybeSingle();
+
+        if (finalCheck) {
+            // Clean up token
+            await supabase.from('email_verification_tokens').delete().eq('token_hash', incomingHash);
+            return res.status(400).json({ error: 'This email has just been verified by another account.' });
         }
 
         const { error: userUpdateError } = await supabase

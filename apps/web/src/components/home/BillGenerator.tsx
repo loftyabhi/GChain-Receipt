@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowRight, Search, Loader2, Shield, CheckCircle, FileText, Lock, X } from 'lucide-react'; // Added Lock, X for modal
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useConnect } from 'wagmi'; // Added useConnect
 import { useRouter } from 'next/navigation'; // Added useRouter
 import { motion, AnimatePresence } from 'framer-motion'; // Added AnimatePresence for modal
@@ -9,9 +9,12 @@ import AdBanner from '../AdBanner';
 import { toast } from 'sonner';
 import { trackTxLookup, trackEvent } from '@/lib/analytics';
 
+import { useConsoleAuth } from '@/context/ConsoleAuthContext'; // Added useConsoleAuth
+
 export function BillGenerator() {
     const { address, isConnected } = useAccount();
     const { connect, connectors } = useConnect();
+    const { token, isAuthenticated, login } = useConsoleAuth(); // Get auth state
     const router = useRouter();
     const [txHash, setTxHash] = useState('');
     const [loading, setLoading] = useState(false);
@@ -20,23 +23,64 @@ export function BillGenerator() {
     const [chainId, setChainId] = useState(8453);
     const [showLoginModal, setShowLoginModal] = useState(false);
 
+    // Debug logging for state
+    useEffect(() => {
+        // console.log('State Update:', { showLoginModal, isConnected, isAuthenticated });
+    }, [showLoginModal, isConnected, isAuthenticated]);
+
+    // Auto-advance login flow when wallet connects
+    useEffect(() => {
+        if (showLoginModal && isConnected && !isAuthenticated) {
+            // console.log('Targeting Login Flow');
+            login()
+                .then(() => {
+                    setShowLoginModal(false);
+                    toast.success("Authenticated successfully");
+                })
+                .catch(() => {
+                    // Ignored (User rejected or failed)
+                });
+        } else if (showLoginModal && isAuthenticated && isConnected) {
+            // console.log('Closing modal (Already auth)');
+            setShowLoginModal(false);
+        }
+    }, [isConnected, isAuthenticated, showLoginModal, login]);
+
+    // Handle full login (Connect + SIWE)
+    const handleLogin = async () => {
+        if (!isConnected) {
+            const preferred = connectors.find(c => c.name === 'MetaMask') || connectors.find(c => c.id === 'injected') || connectors[0];
+            if (preferred) {
+                connect({ connector: preferred });
+            }
+        }
+        // Effect takes over from here
+    };
+
     const generateBill = async (e: React.FormEvent) => {
         e.preventDefault();
+        console.log('Generate button clicked');
+        // toast.info("Debug: Generate clicked"); // Temporary debug
 
-        // Security Gate: Check authentication
-        if (!isConnected || !address) {
+        // Security Gate: Check authentication (Must be fully logged in with Token)
+        if (!isConnected) {
             setShowLoginModal(true);
             return;
         }
 
-        // Authenticated users: redirect to dashboard
-        toast.info("Redirecting to Dashboard for secure generation...");
-        router.push('/dashboard');
-        return;
+        if (!isAuthenticated || !token) {
+            // If connected but not logged in (SIWE), trigger login
+            try {
+                toast.info("Please sign the message to verify ownership.");
+                await login();
+                return; // User has to click generate again after login? or we could auto-resume?
+                // For safety, let them click again or simpler: just return.
+            } catch (e) {
+                return;
+            }
+        }
 
-        // NOTE: The code below is kept for reference but won't execute due to redirect above
-        // This ensures homepage NEVER makes PDF API calls
-        /*
+        // Authenticated users can generate PDFs directly
         if (!txHash) {
             toast.error("Please enter a transaction hash");
             return;
@@ -56,7 +100,10 @@ export function BillGenerator() {
             // 1. Initiate Job
             const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/bills/resolve`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}` // Include JWT Token
+                },
                 body: JSON.stringify({
                     txHash: cleanTxHash,
                     chainId,
@@ -82,7 +129,11 @@ export function BillGenerator() {
             // 2. Poll for Completion
             const pollInterval = setInterval(async () => {
                 try {
-                    const jobRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/bills/job/${jobId}`);
+                    const jobRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/bills/job/${jobId}`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
                     const jobData = await jobRes.json();
 
                     // Handle rate limiting during polling (429) - show warning but continue
@@ -133,26 +184,14 @@ export function BillGenerator() {
             trackTxLookup(chainId.toString(), 'failed', err.message);
             toast.error(err.message, { id: toastId });
         }
-        */
-    }
+    };
 
     const handleChainChange = (newChainId: number) => {
         setChainId(newChainId);
         trackEvent('chain_selected', { chain: newChainId.toString() });
     };
 
-    const handleLogin = () => {
-        // Use the same priority connection strategy as Navbar
-        const preferred = connectors.find(c => c.name === 'MetaMask') || connectors.find(c => c.id === 'injected') || connectors[0];
-        if (preferred) {
-            connect({ connector: preferred });
-            setShowLoginModal(false);
-            toast.success("Wallet connected! Redirecting to Dashboard...");
-            setTimeout(() => router.push('/dashboard'), 1000);
-        } else {
-            toast.error('No suitable wallet connector found');
-        }
-    };
+
 
     return (
         <>
@@ -163,7 +202,7 @@ export function BillGenerator() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
                         onClick={() => setShowLoginModal(false)}
                     >
                         <motion.div
@@ -171,12 +210,12 @@ export function BillGenerator() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.9, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="relative max-w-md w-full bg-[#0F0F11] rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
+                            className="relative max-w-md w-full bg-[#0F0F11] rounded-2xl border border-white/10 shadow-2xl overflow-hidden z-[101]"
                         >
                             {/* Close Button */}
                             <button
                                 onClick={() => setShowLoginModal(false)}
-                                className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors z-10"
+                                className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors z-[102]"
                                 aria-label="Close modal"
                             >
                                 <X size={24} />
@@ -200,7 +239,7 @@ export function BillGenerator() {
 
                                 {/* Subtitle */}
                                 <p className="text-zinc-400 text-center mb-6">
-                                    Connect your wallet to generate professional blockchain receipts
+                                    Connect your wallet to generate and download professional blockchain receipts
                                 </p>
 
                                 {/* Security Message */}

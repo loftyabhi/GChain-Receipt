@@ -74,11 +74,31 @@ export function usageTrackingMiddleware(req: Request, res: Response, next: NextF
                 }
             }
 
+            // Extract user info at the END of request (after auth middleware ran)
+            const finalUserId = (req as any).user?.id || null;
+            const finalApiKeyId = (req as any).apiKeyId || apiKeyId; // Update in case auth middleware set it
+
+            // STRICT ENFORCEMENT: Only log usage if we have a valid identity (User or API Key)
+            // Anonymous/Public traffic is NOT logged to usage_events to prevent DB constraint violations.
+            if (!finalApiKeyId && !finalUserId) {
+                return;
+            }
+
+            // Determine Scope (Strict)
+            let scope: 'api_key' | 'user';
+            if (finalApiKeyId) {
+                scope = 'api_key';
+            } else {
+                scope = 'user';
+            }
+
             // Log to database (fire and forget - don't await)
             supabase
-                .from('api_usage')
+                .from('usage_events')
                 .insert({
-                    api_key_id: apiKeyId,
+                    api_key_id: finalApiKeyId,
+                    user_id: finalUserId,
+                    scope: scope,
                     endpoint: req.path,
                     method: req.method,
                     status_code: res.statusCode,

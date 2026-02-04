@@ -33,6 +33,7 @@ The frontend is a Next.js application located in `apps/web`.
     
     # Routing (Microfrontends)
     DOCS_URL=https://docs.txproof.xyz
+    DEVELOPER_PORTAL_URL=https://txproof.xyz/developers
     ```
 
 ## 2. Backend (Render / Railway)

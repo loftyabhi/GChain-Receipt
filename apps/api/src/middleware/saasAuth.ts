@@ -1,156 +1,172 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiKeyService, ApiKeyDetails } from '../services/ApiKeyService';
+import { UsageService } from '../services/UsageService';
 import { AnalyticsService } from '../services/AnalyticsService';
 
 const apiKeyService = new ApiKeyService();
+const usageService = new UsageService();
 const analyticsService = new AnalyticsService();
 
 // Extended Request type to include auth context
 export interface AuthenticatedRequest extends Request {
-    auth?: ApiKeyDetails;
+    auth?: ApiKeyDetails; // Public API Context
+    user?: { id: string; wallet_address: string; role?: string }; // Internal User Context
 }
 
-// In-Memory Token Bucket for Realtime RPS (Per Instance)
-// Key: api_key_id -> { tokens, lastRefill }
-const buckets = new Map<string, { tokens: number, lastRefill: number }>();
+// Trust Configuration
+const INTERNAL_DOMAINS = ['backend.txproof.xyz', 'localhost', '127.0.0.1'];
+const PUBLIC_DOMAINS = ['api.txproof.xyz'];
 
-function checkRealtimeLimit(keyId: string, limitRps: number): boolean {
-    const now = Date.now();
-    const bucket = buckets.get(keyId) || { tokens: limitRps, lastRefill: now };
-
-    // Refill logic
-    const elapsed = (now - bucket.lastRefill) / 1000; // seconds
-    if (elapsed > 0) {
-        const added = elapsed * limitRps;
-        bucket.tokens = Math.min(limitRps, bucket.tokens + added);
-        bucket.lastRefill = now;
-    }
-
-    if (bucket.tokens >= 1) {
-        bucket.tokens -= 1;
-        buckets.set(keyId, bucket);
-        return true;
-    }
-
-    return false;
+function isInternalRequest(req: Request): boolean {
+    const host = req.get('host') || '';
+    // Strip port for localhost check
+    const hostname = host.split(':')[0];
+    return INTERNAL_DOMAINS.includes(hostname);
 }
 
 export const saasMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+    const isInternal = isInternalRequest(req);
     const authHeader = req.headers['authorization'];
-    const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const apiKeyHeader = req.headers['x-api-key'];
 
-    // 4. Auth & API Key Key Context Resolution
-    let details: ApiKeyDetails | null = null;
-    let authMethod = 'apikey';
+    // Auth State
+    let authContext: 'user' | 'api_key' | null = null;
+    let quotaResult = null;
+    let resourceId = '';
 
     try {
-        // Priority 1: User Auth (Bearer JWT)
-        if (authHeader?.startsWith('Bearer ') && !authHeader.startsWith('Bearer sk_')) {
-            authMethod = 'jwt';
+        // =================================================================
+        // TRUST ZONE 1: INTERNAL (First-Party)
+        // =================================================================
+        if (isInternal) {
+            // Requirement 1: MUST be JWT
+            if (!authHeader?.startsWith('Bearer ') || authHeader.startsWith('Bearer sk_')) {
+                // If they try to use an API key internally -> BLOCK
+                if (apiKeyHeader || authHeader?.startsWith('Bearer sk_')) {
+                    return res.status(403).json({
+                        code: 'AUTH_MISMATCH',
+                        error: 'API Keys are not accepted on internal endpoints. Use JWT.'
+                    });
+                }
+                return res.status(401).json({ code: 'MISSING_AUTH', error: 'Authentication Required (JWT)' });
+            }
+
+            // Verify JWT
             const token = authHeader.split(' ')[1];
             try {
-                // Lazy load AuthService
+                // Lazy Load to avoid circular deps if any
                 const { AuthService } = require('../services/AuthService');
                 const authService = new AuthService();
                 const payload = authService.verifyToken(token);
 
-                if (payload && payload.id) {
-                    // Resolve Primary Key
-                    // Usage: user.primary_api_key_id (Future Optimization)
-                    // Current: getActiveKeyForUser acts as the resolver.
-                    details = await apiKeyService.getActiveKeyForUser(payload.id);
-
-                    if (!details) {
-                        // Strict Guard: No valid API Key context found for this user.
-                        // We do NOT auto-create keys here to avoid side effects (mutating billing state) in middleware.
-                        return res.status(400).json({
-                            code: 'NO_LINKED_API_KEY',
-                            error: 'No active API Key linked to your account. Please create one in the Dashboard.'
-                        });
-                    }
+                if (!payload || !payload.id) {
+                    throw new Error('Invalid Token Payload');
                 }
+
+                // Attach Context
+                (req as AuthenticatedRequest).user = {
+                    id: payload.id,
+                    wallet_address: payload.wallet_address,
+                    role: payload.role
+                };
+
+                authContext = 'user';
+                resourceId = payload.id;
+
             } catch (e) {
-                // Std: If Bearer provided but invalid -> 401
-                return res.status(401).json({ code: 'INVALID_TOKEN', error: 'Invalid Authentication Token' });
+                return res.status(401).json({ code: 'INVALID_TOKEN', error: 'Invalid or Expired Session' });
             }
-        }
 
-        // Priority 2: Machine Auth (X-API-Key)
-        else if (req.headers['x-api-key']) {
-            authMethod = 'apikey';
-            const key = Array.isArray(req.headers['x-api-key']) ? req.headers['x-api-key'][0] : req.headers['x-api-key'];
-            if (key) details = await apiKeyService.verifyKey(key);
-        }
+            // Strict Ban Check (Database Hit)
+            const { data: userStatus } = await import('../lib/supabase').then(m => m.supabase
+                .from('users')
+                .select('account_status')
+                .eq('id', (req as AuthenticatedRequest).user?.id) // Safe access after assignment
+                .single()
+            );
 
-        // Priority 3: Legacy Machine Auth (Bearer sk_)
-        else if (apiKey && apiKey.startsWith('sk_')) {
-            authMethod = 'legacy';
-            details = await apiKeyService.verifyKey(apiKey);
-        }
-
-        // 1. Authentication Check
-        if (!details) {
-            if (authMethod === 'jwt') {
-                return res.status(403).json({ code: 'NO_ACTIVE_API_KEY', error: 'Dashboard users must have an active API Key to use this feature. Please create one in Settings.' });
+            if (userStatus && userStatus.account_status !== 'active') {
+                return res.status(403).json({
+                    code: 'ACCOUNT_SUSPENDED',
+                    error: `Your account has been ${userStatus.account_status}. Contact support.`
+                });
             }
-            return res.status(401).json({ code: 'MISSING_API_KEY', error: 'Missing or invalid API Key' });
+
+            // Check User Quota
+            quotaResult = await usageService.incrementUserUsage(resourceId, 1);
         }
 
-        // 1.1 Hard Abuse/Invalid Check - (Already checked in Service, but double safety)
-        if (details.ipAllowlist && details.ipAllowlist.length > 0) {
-            const clientIp = req.ip || '0.0.0.0';
-            if (!details.ipAllowlist.includes(clientIp)) {
-                return res.status(403).json({ code: 'IP_NOT_ALLOWED', error: 'IP Address not allowed' });
+        // =================================================================
+        // TRUST ZONE 2: PUBLIC (Developer API)
+        // =================================================================
+        else {
+            // Requirement 2: MUST be API Key
+            let key = '';
+            if (apiKeyHeader) {
+                key = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+            } else if (authHeader?.startsWith('Bearer sk_')) {
+                key = authHeader.slice(7);
+            } else {
+                // If they try to use JWT externally -> BLOCK
+                if (authHeader?.startsWith('Bearer ')) {
+                    return res.status(403).json({
+                        code: 'AUTH_MISMATCH',
+                        error: 'JWT Authentication is not accepted on Public API. Use X-API-Key.'
+                    });
+                }
+                return res.status(401).json({ code: 'MISSING_API_KEY', error: 'X-API-Key Header Required' });
             }
+
+            const details = await apiKeyService.verifyKey(key);
+            if (!details) {
+                return res.status(401).json({ code: 'INVALID_API_KEY', error: 'Invalid or Inactive API Key' });
+            }
+
+            // Attach Context
+            (req as AuthenticatedRequest).auth = details;
+
+            authContext = 'api_key';
+            resourceId = details.id;
+
+            // Check API Key Quota
+            quotaResult = await usageService.incrementApiKeyUsage(resourceId, 1);
         }
 
-        // 2. Realtime Rate Limit (RPS)
-        if (!checkRealtimeLimit(details.id, details.plan.rate_limit_rps)) {
-            return res.status(429).json({ code: 'RATE_LIMIT_EXCEEDED', error: 'Too Many Requests (Rate Limit)' });
+        // =================================================================
+        // QUOTA ENFORCEMENT & HEADERS
+        // =================================================================
+        if (!quotaResult) {
+            return res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Quota Check Failed' });
         }
 
-        // 3. Quota Limit (Monthly)
-        const quota = await apiKeyService.checkAndIncrementUsage(details.id);
+        res.setHeader('X-Quota-Limit', quotaResult.limit);
+        res.setHeader('X-Quota-Used', quotaResult.used);
+        res.setHeader('X-Quota-Remaining', quotaResult.remaining);
 
-        // Standard Headers (Stripe-like)
-        res.setHeader('X-Quota-Limit', quota.limit);
-        res.setHeader('X-Quota-Used', quota.used);
-        res.setHeader('X-Quota-Remaining', quota.remaining);
-
-        if (!quota.allowed) {
-            // Overage logic handled in Service or here?
-            return res.status(402).json({
+        if (!quotaResult.allowed) {
+            return res.status(429).json({
                 code: 'QUOTA_EXCEEDED',
-                error: 'Monthly Quota Exceeded. Please upgrade your plan.'
+                error: isInternal
+                    ? 'Monthly usage limit reached. Contact support to increase standard quota.'
+                    : 'Plan quota exceeded. Please upgrade your plan.'
             });
         }
 
-        // Attach context
-        (req as AuthenticatedRequest).auth = details;
-
-        // Response Hook for Logging (Latency & Status)
+        // =================================================================
+        // LOGGING (Fire & Forget)
+        // =================================================================
         const start = Date.now();
         res.on('finish', () => {
-            if (!details) return;
-
             const duration = Date.now() - start;
-            // Fire & Forget Logging
-            analyticsService.trackRequest({
-                apiKeyId: details.id,
-                endpoint: req.originalUrl || req.path,
-                method: req.method,
-                status: res.statusCode,
-                duration,
-                ip: req.ip || 'unknown',
-                userAgent: req.get('user-agent'),
-                metadata: { auth_mode: authMethod }
-            }).catch(console.error);
+            // TODO: Update AnalyticsService to handle 'user' scope logs if needed
+            // For now, only logging API Key traffic or adapt AnalyticsService later
+            // analyticsService.trackRequest(...)
         });
 
         next();
 
     } catch (error) {
-        console.error('Middleware Error:', error);
+        console.error('Middleware Critical Error:', error);
         res.status(500).json({ code: 'INTERNAL_AUTH_ERROR', error: 'Internal Auth Error' });
     }
 };

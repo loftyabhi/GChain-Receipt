@@ -10,13 +10,15 @@ This document outlines the security architecture, potential risks, and implement
 
 ### 2.1 Backend (Node.js/Express)
 -   **Environment Isolation:** Sensitive keys (`PRIVATE_KEY`, `ADMIN_PRIVATE_KEY`, `JWT_SECRET`) are stored in `.env` files and never committed to version control.
--   **Rate Limiting:** Implemented on public endpoints to prevent DoS attacks (configurable in `index.ts`).
--   **CORS Policy:** Strict CORS settings allowing only trusted domains (local and production frontend URLs).
+-   **Rate Limiting:** Implemented on public endpoints to prevent DoS attacks.
+-   **CSRF Protection:** Native CSRF token generation and validation for all state-changing admin operations.
+-   **CORS Policy:** Strict CORS settings allowing only trusted domains.
 -   **Helmet/Security Headers:** Added via middleware to prevent XSS and clickjacking.
 
 ### 2.2 Database (Supabase/PostgreSQL)
--   **Row Level Security (RLS):** Enabled on public tables where applicable.
--   **Connection Pooling:** Uses Transaction Pooler (Port 6543) for serverless environments to prevent connection malicious exhaustion.
+-   **Row Level Security (RLS):** Enabled on public tables.
+-   **Account Ban System:** Unified trust-zone architecture to immediate revoke access for malicious entities.
+-   **Connection Pooling:** Uses Transaction Pooler (Port 6543) for serverless environments.
 -   **Least Privilege:** Application connects using a service role, but critical admin operations are gated by application-level logic.
 
 ## 3. Smart Contract Security (`SupportVault.sol`)

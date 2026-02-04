@@ -15,11 +15,11 @@ npm install
 
 ### 2. Project Structure
 
--   `apps/web`: Next.js Frontend & Client-side Print Engine.
--   `apps/api`: Node.js/Express Backend & Semantic Classifier.
--   `packages/contracts`: Smart Contracts & ABIs.
--   `packages/domain`: Shared TypeScript interfaces.
--   `packages/database`: SQL Schema & Migrations.
+-   `apps/web`: Next.js (Tailwind) Frontend & Client-side Print Engine.
+-   `apps/api`: Node.js/Express Backend, Public APIs & Semantic Classifier.
+-   `packages/contracts`: Smart Contracts (SupportVault) & ABIs.
+-   `packages/domain`: Shared TypeScript interfaces & Constants.
+-   `packages/database`: SQL Schema & Supabase Migrations.
 
 ### 3. Running Locally
 

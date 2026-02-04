@@ -75,6 +75,7 @@ export class ApiKeyService {
             .select(`
                 id,
                 owner_id,
+                owner_user_id,
                 environment,
                 permissions,
                 is_active,
@@ -96,11 +97,36 @@ export class ApiKeyService {
 
         // 1. Hard Abuse Validation
         if (data.abuse_flag) {
-            console.warn(`[Security] Blocked abuse-flagged key: ${data.id}`);
+            console.warn(`[Security] Blocked abuse - flagged key: ${data.id} `);
             return null;
         }
 
         if (!data.is_active) return null;
+
+        // 2. Strict Account Ban Check (Owner Status)
+        // We check both owner_user_id (Linked) and owner_id (Wallet/Legacy)
+        let ownerStatus = 'active';
+
+        if (data.owner_user_id) {
+            const { data: userData } = await supabase
+                .from('users')
+                .select('account_status')
+                .eq('id', data.owner_user_id)
+                .single();
+            if (userData) ownerStatus = userData.account_status;
+        } else if (data.owner_id) {
+            const { data: userData } = await supabase
+                .from('users')
+                .select('account_status')
+                .eq('wallet_address', data.owner_id.toLowerCase())
+                .single();
+            if (userData) ownerStatus = userData.account_status;
+        }
+
+        if (ownerStatus !== 'active') {
+            console.warn(`[Security] Blocked key ${data.id} because owner is ${ownerStatus} `);
+            return null; // Implicit 401/403 downstream
+        }
 
         // Flatten checks
         return {
@@ -120,22 +146,22 @@ export class ApiKeyService {
         const { data, error } = await supabase
             .from('api_keys')
             .select(`
+        id,
+            owner_id,
+            environment,
+            permissions,
+            is_active,
+            ip_allowlist,
+            abuse_flag,
+            plan: plans(
                 id,
-                owner_id,
-                environment,
-                permissions,
-                is_active,
-                ip_allowlist,
-                abuse_flag,
-                plan:plans (
-                    id, 
-                    name, 
-                    rate_limit_rps, 
-                    monthly_quota,
-                    max_burst,
-                    priority_level
-                )
-            `)
+                name,
+                rate_limit_rps,
+                monthly_quota,
+                max_burst,
+                priority_level
+            )
+                `)
             .eq('owner_user_id', userId)
             .eq('is_active', true)
             .limit(1)
@@ -173,9 +199,9 @@ export class ApiKeyService {
         const { data: keyData, error: keyError } = await supabase
             .from('api_keys')
             .select(`
-                id, quota_limit,
-                plan:plans (monthly_quota, name)
-            `)
+        id, quota_limit,
+            plan: plans(monthly_quota, name)
+                `)
             .eq('id', keyId)
             .single();
 
@@ -206,7 +232,7 @@ export class ApiKeyService {
 
         // 3. Get accurate count for headers
         const { data: agg } = await supabase
-            .from('api_usage_aggregates')
+            .from('usage_aggregates')
             .select('request_count')
             .eq('api_key_id', keyId)
             .eq('period_start', new Date().toISOString().slice(0, 7) + '-01') // YYYY-MM-01
@@ -228,7 +254,7 @@ export class ApiKeyService {
      */
     async logRequest(log: { apiKeyId: string, endpoint: string, status: number, duration: number, ip: string }) {
         // In high scale, push to a queue. For now, direct insert.
-        await supabase.from('api_usage').insert({
+        await supabase.from('usage_events').insert({
             api_key_id: log.apiKeyId,
             endpoint: log.endpoint,
             status_code: log.status,

@@ -18,7 +18,7 @@ export class AnalyticsService {
         // In high-volume systems, this would buffer to Redis or use a log drain.
         // Direct DB insert for < 100 RPS is fine with Postgres.
         try {
-            await supabase.from('api_usage').insert({
+            await supabase.from('usage_events').insert({
                 api_key_id: data.apiKeyId,
                 endpoint: data.endpoint,
                 status_code: data.status,
@@ -42,7 +42,7 @@ export class AnalyticsService {
         startOfMonth.setHours(0, 0, 0, 0);
 
         const { data } = await supabase
-            .from('api_usage_aggregates')
+            .from('usage_aggregates')
             .select('request_count')
             .eq('api_key_id', apiKeyId)
             .eq('period_start', startOfMonth.toISOString())

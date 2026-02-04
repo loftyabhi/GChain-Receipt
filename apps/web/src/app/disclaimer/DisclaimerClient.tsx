@@ -51,17 +51,13 @@ export default function DisclaimerClient() {
                     initial={fadeIn.initial}
                     animate={fadeIn.animate}
                     transition={fadeIn.transition}
-                    className="text-center mb-16"
+                    className="mb-12 border-b border-white/10 pb-8 text-center md:text-left"
                 >
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs font-bold tracking-wide uppercase mb-6 backdrop-blur-sm">
-                        <AlertTriangle size={14} />
-                        Important Notice
-                    </div>
-                    <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60 mb-6 tracking-tight">
+                    <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 tracking-tight">
                         Disclaimer
                     </h1>
-                    <p className="text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-                        Please read this disclaimer carefully before using our service.
+                    <p className="text-lg text-zinc-400">
+                        Last Updated: February 04, 2026
                     </p>
                 </motion.div>
 
@@ -90,16 +86,6 @@ export default function DisclaimerClient() {
                     ))}
                 </div>
 
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.5 }}
-                    className="mt-16 pt-8 border-t border-white/10 text-center"
-                >
-                    <p className="text-sm text-zinc-500">
-                        Last updated: January 2026
-                    </p>
-                </motion.div>
 
             </div>
         </main>

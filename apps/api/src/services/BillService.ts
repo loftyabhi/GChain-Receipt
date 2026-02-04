@@ -18,7 +18,8 @@ export interface BillRequest {
     txHash: string;
     chainId: number;
     connectedWallet?: string;
-    apiKeyId?: string; // [NEW] Context for Template
+    apiKeyId?: string; // Public API Context
+    userId?: string;   // Internal User Context
     forceRegenerate?: boolean; // New flag for Self-Healing
 }
 
@@ -1081,6 +1082,7 @@ export class BillService {
 
     private async performUpsert(txHash: string, chainId: number, wallet: string | null, data: BillViewModel, isConfirmed: boolean, receiptHash?: string) {
         const payload: any = {
+            bill_id: data.BILL_ID, // Required JSON ID
             tx_hash: txHash,
             chain_id: chainId,
             bill_json: data,

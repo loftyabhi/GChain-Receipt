@@ -112,7 +112,7 @@ export class AuthService {
         // We select first to get ID if exists
         let { data: user, error: fetchError } = await supabase
             .from('users')
-            .select('id, wallet_address')
+            .select('id, wallet_address, account_status')
             .eq('wallet_address', walletAddress.toLowerCase())
             .single();
 
@@ -120,7 +120,7 @@ export class AuthService {
             // Create new user
             const { data: newUser, error: createError } = await supabase
                 .from('users')
-                .insert({ wallet_address: walletAddress.toLowerCase() })
+                .insert({ wallet_address: walletAddress.toLowerCase(), account_status: 'active' })
                 .select()
                 .single();
 
@@ -133,6 +133,10 @@ export class AuthService {
 
         if (!user) {
             throw new Error('User not found');
+        }
+
+        if (user.account_status !== 'active') {
+            throw new Error(`Login failed: Account is ${user.account_status}. Please contact support.`);
         }
 
         // 3. Issue Token

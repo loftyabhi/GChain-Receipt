@@ -18,8 +18,8 @@ export class SoftQueueService {
     /**
      * Enqueue a job (Wait-Free / Idempotent).
      */
-    async enqueue(txHash: string, chainId: number, options: { connectedWallet?: string, apiKeyId?: string, priority?: number } = {}) {
-        const { connectedWallet, apiKeyId, priority = 0 } = options;
+    async enqueue(txHash: string, chainId: number, options: { connectedWallet?: string, apiKeyId?: string, userId?: string, priority?: number } = {}) {
+        const { connectedWallet, apiKeyId, userId, priority = 0 } = options;
 
         // 1. Check existing
         const { data: existing } = await supabase
@@ -45,6 +45,7 @@ export class SoftQueueService {
                 status: 'pending',
                 metadata: connectedWallet ? { connectedWallet } : {},
                 api_key_id: apiKeyId || null,
+                user_id: userId || null,
                 priority: priority // 0 for free/anon, 10+ for paid
             })
             .select()

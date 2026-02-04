@@ -100,8 +100,13 @@ export function Footer() {
                                 </Link>
                             </li>
                             <li>
+                                <Link href="/developers" target="_blank" rel="noopener noreferrer" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                    Developer Portal
+                                </Link>
+                            </li>
+                            <li>
                                 <a href="https://docs.txproof.xyz" target="_blank" rel="noopener noreferrer" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
-                                    Developer API
+                                    Documentation
                                 </a>
                             </li>
                             <li>
@@ -135,6 +140,11 @@ export function Footer() {
                             <li>
                                 <Link href="/terms-of-service" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
                                     Terms of Service
+                                </Link>
+                            </li>
+                            <li>
+                                <Link href="/cookie-policy" className="text-sm text-gray-400 hover:text-violet-400 transition-colors">
+                                    Cookie Policy
                                 </Link>
                             </li>
                             <li>

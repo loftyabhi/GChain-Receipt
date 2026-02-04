@@ -34,7 +34,7 @@ router.get('/', async (req: Request, res: Response) => {
 
         // Count total API requests in date range
         const { count, error: countError } = await supabase
-            .from('api_usage')
+            .from('usage_events')
             .select('*', { count: 'exact', head: true })
             .eq('api_key_id', apiKeyId)
             .gte('created_at', startDate)
@@ -90,7 +90,7 @@ router.get('/history', async (req: Request, res: Response) => {
 
         // Fetch real API logs from database
         const { data: logs, error } = await supabase
-            .from('api_usage')
+            .from('usage_events')
             .select('endpoint, method, status_code, duration_ms, created_at, error_message')
             .eq('api_key_id', apiKeyId)
             .order('created_at', { ascending: false })

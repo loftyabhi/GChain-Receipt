@@ -8,14 +8,12 @@ TxProof is a full-stack application designed to generate detailed financial rece
 
 - **Automated Receipt Generation**: Converts blockchain transactions into professional, audit-ready PDF receipts.
 - **Transaction Classification**: Enterprise-grade deterministic semantic classifier for transaction types.
+- **Public Developer APIs**: Robust API suite for programmatic transaction analysis and receipt generation.
 - **Support System**: Accept donations via `SupportVault.sol` with **Anonymous** contribution support.
 - **Event-Driven Indexer**: Hybrid indexing with live push-based ingestion + background verification.
-- **Blockscout Integration**: Fetch internal transactions for accurate financial records.
-- **Admin Dashboard**: Control center to manage Advertisement campaigns (Web & PDF placements).
+- **Admin Dashboard**: Control center for ad management, user verification, and quota monitoring.
 - **Zero-Knowledge Privacy**: Client-side processing architecture ensuring sensitive user data never leaves the browser.
-- **Enterprise Security**: Strict physical separation of frontend and backend runtimes.
-- **Historical Pricing**: Accurate point-in-time valuation via multi-layered caching.
-- **Soft Queue Architecture**: Database-backed job management for high reliability.
+- **Enterprise Security**: CSRF protection, admin wallet signatures, and strict resource isolation.
 - **High-Fidelity Layouts**: Professional, printable layouts rendered natively in the browser.
 
 ## 🏗️ Architecture

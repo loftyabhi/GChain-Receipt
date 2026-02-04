@@ -172,13 +172,13 @@ router.get('/usage', async (req: Request, res: Response) => {
 
         // 1. Basic Counts
         const { count: requestsToday } = await supabase
-            .from('api_usage')
+            .from('usage_events')
             .select('*', { count: 'exact', head: true })
             .gte('created_at', today);
 
         // 2. Recent Errors
         const { data: errors } = await supabase
-            .from('api_usage')
+            .from('usage_events')
             .select('*')
             .gte('status_code', 400)
             .order('created_at', { ascending: false })
@@ -188,7 +188,7 @@ router.get('/usage', async (req: Request, res: Response) => {
         // implies we should stick to basic stats or use the new 'aggregates' table)
         // Let's use `api_usage_aggregates` for top quotas
         const { data: topKeys } = await supabase
-            .from('api_usage_aggregates')
+            .from('usage_aggregates')
             .select('api_key_id, request_count, api_keys(prefix, owner_id)')
             .eq('period_start', today.substring(0, 7) + '-01') // This Month
             .order('request_count', { ascending: false })
@@ -356,7 +356,7 @@ router.get('/users/:id/logs', async (req: Request, res: Response) => {
 
         // 2. Get API usage logs for these keys
         const { data, error } = await supabase
-            .from('api_usage')
+            .from('usage_events')
             .select('*')
             .in('api_key_id', keyIds)
             .order('created_at', { ascending: false })
@@ -364,6 +364,309 @@ router.get('/users/:id/logs', async (req: Request, res: Response) => {
 
         if (error) throw error;
         res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * PUT /api/v1/admin/users/:id/quota
+ * Update user quota settings
+ */
+router.put('/users/:id/quota', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { monthly_quota, quota_override } = req.body;
+        const actorId = (req as any).user?.address || 'admin';
+
+        const updates: any = {};
+        if (monthly_quota !== undefined) {
+            if (monthly_quota < 0) return res.status(400).json({ error: 'Monthly quota must be >= 0' });
+            updates.monthly_quota = monthly_quota;
+        }
+        if (quota_override !== undefined) {
+            // Allow null to reset, but check negatives if number
+            if (quota_override !== null && quota_override < 0) return res.status(400).json({ error: 'Quota override must be >= 0 or null' });
+            updates.quota_override = quota_override;
+        }
+
+        // Fetch old values for audit
+        const { data: oldUser } = await supabase.from('users').select('monthly_quota, quota_override').eq('id', id).single();
+
+        const { data, error } = await supabase
+            .from('users')
+            .update(updates)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await auditService.log({
+            actorId,
+            action: 'USER_QUOTA_UPDATED',
+            targetId: id,
+            metadata: {
+                old: oldUser,
+                new: { monthly_quota, quota_override }
+            },
+            ip: req.ip
+        });
+
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/users/:id/suspend
+ * Emergency: Set quota_override to 0
+ */
+router.post('/users/:id/suspend', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const actorId = (req as any).user?.address || 'admin';
+
+        const { data: oldUser } = await supabase.from('users').select('quota_override').eq('id', id).single();
+
+        const { data, error } = await supabase
+            .from('users')
+            .update({ quota_override: 0 })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await auditService.log({
+            actorId,
+            action: 'USER_QUOTA_SUSPENDED',
+            targetId: id,
+            metadata: { old_override: oldUser?.quota_override },
+            ip: req.ip
+        });
+
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/users/:id/restore-quota
+ * Restore: Set quota_override to NULL (Default to monthly)
+ */
+router.post('/users/:id/restore-quota', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const actorId = (req as any).user?.address || 'admin';
+
+        const { data: oldUser } = await supabase.from('users').select('quota_override').eq('id', id).single();
+
+        const { data, error } = await supabase
+            .from('users')
+            .update({ quota_override: null })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await auditService.log({
+            actorId,
+            action: 'USER_QUOTA_RESTORED',
+            targetId: id,
+            metadata: { old_override: oldUser?.quota_override },
+            ip: req.ip
+        });
+
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/users/:id/ban
+ * Ban user account (Block Login & API)
+ */
+router.post('/users/:id/ban', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+        const actorId = (req as any).user?.address || 'admin';
+
+        if (!reason) return res.status(400).json({ error: 'Ban reason is required' });
+
+        // Resolve Admin UUID
+        let adminUuid = null;
+        if (actorId && actorId !== 'admin') {
+            const { data: adminUser } = await supabase.from('users').select('id').eq('wallet_address', actorId.toLowerCase()).single();
+            if (adminUser) adminUuid = adminUser.id;
+        }
+
+        // 1. Update User
+        const { data: user, error } = await supabase
+            .from('users')
+            .update({
+                account_status: 'banned',
+                ban_reason: reason,
+                banned_at: new Date().toISOString(),
+                banned_by: adminUuid
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        // 2. Audit
+        await auditService.log({
+            actorId,
+            action: 'ACCOUNT_BANNED',
+            targetId: id,
+            metadata: { reason, email: user.email },
+            ip: req.ip
+        });
+
+        // 3. Email Notification
+        if (user.email) {
+            const subject = 'Important: Your TxProof Account has been Suspended';
+            const html = `
+                <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #d32f2f;">Account Suspended</h2>
+                    <p>Your account access has been revoked effective immediately.</p>
+                    <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <strong>Reason:</strong> ${reason}
+                    </div>
+                    <p>If you believe this is an error, please contact support at <a href="mailto:support@txproof.xyz">support@txproof.xyz</a>.</p>
+                </div>
+            `;
+            // Using sendRaw for direct delivery
+            await emailService.sendRaw(user.email, subject, html, `Your account was suspended. Reason: ${reason}`);
+        }
+
+        res.json(user);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/users/:id/unban
+ * Restore user account
+ */
+router.post('/users/:id/unban', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const actorId = (req as any).user?.address || 'admin';
+
+        // 1. Update User
+        const { data: user, error } = await supabase
+            .from('users')
+            .update({
+                account_status: 'active',
+                ban_reason: null,
+                banned_at: null,
+                banned_by: null
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        // 2. Audit
+        await auditService.log({
+            actorId,
+            action: 'ACCOUNT_UNBANNED',
+            targetId: id,
+            metadata: { email: user.email },
+            ip: req.ip
+        });
+
+        // 3. Email Notification
+        if (user.email) {
+            const subject = 'Account Restored - TxProof';
+            const html = `
+                <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #2e7d32;">Account Restored</h2>
+                    <p>Your account access has been restored.</p>
+                    <p>You may now login and use the API.</p>
+                </div>
+            `;
+            await emailService.sendRaw(user.email, subject, html, "Your account has been restored.");
+        }
+
+        res.json(user);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/users/:id/send-verification
+ * Generates a verification token and sends an email via EmailService
+ */
+router.post('/users/:id/send-verification', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { expiryMinutes } = req.body;
+        const actorId = (req as any).user?.address || 'admin';
+
+        // 1. Fetch User
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('email, wallet_address')
+            .eq('id', id)
+            .single();
+
+        if (userError || !user || !user.email) {
+            return res.status(400).json({ error: 'User not found or has no email' });
+        }
+
+        // 1.1 Check if this email is already verified by another user
+        const { data: duplicateUser } = await supabase
+            .from('users')
+            .select('id')
+            .ilike('email', user.email)
+            .eq('is_email_verified', true)
+            .neq('id', id)
+            .maybeSingle();
+
+        if (duplicateUser) {
+            return res.status(400).json({ error: 'This email is already linked to another verified account.' });
+        }
+
+        // 2. Generate Token
+        const rawToken = generateRandomToken();
+        const hashedToken = hashToken(rawToken);
+        const expiresAt = new Date();
+        expiresAt.setMinutes(expiresAt.getMinutes() + (expiryMinutes || 15));
+
+        // 3. Save to DB
+        await supabase
+            .from('email_verification_tokens')
+            .insert({
+                user_id: id,
+                token_hash: hashedToken,
+                expires_at: expiresAt.toISOString()
+            });
+
+        // 4. Send Email
+        await emailService.sendVerificationEmail(user.email, rawToken, expiryMinutes || 15);
+
+        // 5. Audit Log
+        await auditService.log({
+            actorId,
+            action: 'EMAIL_VERIFICATION_SENT_ADMIN',
+            targetId: id,
+            metadata: { email: user.email, expiryMinutes },
+            ip: req.ip
+        });
+
+        res.json({ success: true, message: 'Verification email sent' });
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
@@ -469,7 +772,7 @@ router.post('/users/:id/send-verification', async (req: Request, res: Response) 
             throw new Error('Verification email template not configured (admin-verification)');
         }
 
-        const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify/${token}`;
+        const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify?token=${token}`;
 
         await emailQueueService.enqueueJob({
             recipientEmail: user.email,

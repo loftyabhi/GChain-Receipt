@@ -6,7 +6,7 @@ import { AdminLogin } from '../../components/AdminLogin';
 import { Navbar } from '@/components/Navbar';
 import EmailOpsPage from './email/page';
 import axios from 'axios';
-import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight, Mail } from 'lucide-react';
+import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight, Mail, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { formatEther, parseEther, erc20Abi, formatUnits } from 'viem';
@@ -307,6 +307,88 @@ export default function DashboardPage() {
         }
     };
 
+    // --- Quota Management ---
+    const [quotaModalOpen, setQuotaModalOpen] = useState(false);
+    const [quotaUser, setQuotaUser] = useState<any>(null);
+    const [quotaMonthly, setQuotaMonthly] = useState<number>(0);
+    const [quotaOverride, setQuotaOverride] = useState<string>('');
+    const [banReason, setBanReason] = useState('');
+
+    const handleOpenQuota = (u: any) => {
+        setQuotaUser(u);
+        setQuotaMonthly(u.monthly_quota ?? 1000);
+        setQuotaOverride(u.quota_override === null ? '' : u.quota_override.toString());
+        setQuotaModalOpen(true);
+    };
+
+    const handleSaveQuota = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!quotaUser) return;
+        const toastId = toast.loading("Updating quota...");
+        try {
+            const overrideVal = quotaOverride === '' ? null : Number(quotaOverride);
+            await axios.put(`/api/v1/admin/users/${quotaUser.id}/quota`, {
+                monthly_quota: Number(quotaMonthly),
+                quota_override: overrideVal
+            }, { headers: { 'X-CSRF-Token': csrfToken } });
+
+            toast.success("Quota updated", { id: toastId });
+            setQuotaModalOpen(false);
+            fetchUsers();
+        } catch (err) {
+            handleError(err);
+            toast.dismiss(toastId);
+        }
+    };
+
+    const handleSuspendUser = async () => {
+        if (!quotaUser) return;
+        if (!confirm("Are you sure? This will block the user immediately.")) return;
+        const toastId = toast.loading("Suspending user...");
+        try {
+            await axios.post(`/api/v1/admin/users/${quotaUser.id}/suspend`, {}, { headers: { 'X-CSRF-Token': csrfToken } });
+            toast.success("User suspended (Quota = 0)", { id: toastId });
+            setQuotaModalOpen(false);
+            fetchUsers();
+        } catch (err) { handleError(err); toast.dismiss(toastId); }
+    };
+
+    const handleRestoreQuota = async () => {
+        if (!quotaUser) return;
+        const toastId = toast.loading("Restoring defaults...");
+        try {
+            await axios.post(`/api/v1/admin/users/${quotaUser.id}/restore-quota`, {}, { headers: { 'X-CSRF-Token': csrfToken } });
+            toast.success("Quota restored", { id: toastId });
+            setQuotaModalOpen(false);
+            fetchUsers();
+        } catch (err) { handleError(err); toast.dismiss(toastId); }
+    };
+
+    const handleBanUser = async () => {
+        if (!quotaUser || !banReason) return;
+        if (!confirm("Confirm BAN? This user will be blocked immediately.")) return;
+        const toastId = toast.loading("Banning user...");
+        try {
+            await axios.post(`/api/v1/admin/users/${quotaUser.id}/ban`, { reason: banReason }, { headers: { 'X-CSRF-Token': csrfToken } });
+            toast.success("User BANNED", { id: toastId });
+            setQuotaModalOpen(false);
+            setBanReason('');
+            fetchUsers();
+        } catch (err) { handleError(err); toast.dismiss(toastId); }
+    };
+
+    const handleUnbanUser = async () => {
+        if (!quotaUser) return;
+        if (!confirm("Confirm UNBAN? Access will be restored.")) return;
+        const toastId = toast.loading("Unbanning user...");
+        try {
+            await axios.post(`/api/v1/admin/users/${quotaUser.id}/unban`, {}, { headers: { 'X-CSRF-Token': csrfToken } });
+            toast.success("User Active", { id: toastId });
+            setQuotaModalOpen(false);
+            fetchUsers();
+        } catch (err) { handleError(err); toast.dismiss(toastId); }
+    };
+
     // ... (Created Key handlers unchanged)
 
     const handleCreateKey = async (e: React.FormEvent) => {
@@ -416,6 +498,10 @@ export default function DashboardPage() {
 
     const handleWithdraw = async () => {
         if (!withdrawAddress || !withdrawAmount) return;
+        if (Number(withdrawAmount) < 0) {
+            toast.error("Amount cannot be negative");
+            return;
+        }
         const promise = isERC20Withdraw && withdrawTokenAddress
             ? writeContractAsync({
                 address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: 'withdrawERC20',
@@ -431,6 +517,10 @@ export default function DashboardPage() {
 
     const handleSetMin = () => {
         if (!newMinContribution) return;
+        if (Number(newMinContribution) < 0) {
+            toast.error("Amount cannot be negative");
+            return;
+        }
         wrapTx(writeContractAsync({
             address: VAULT_ADDRESS, abi: VAULT_ABI, functionName: 'setMinContributionNative',
             args: [parseEther(newMinContribution)],
@@ -683,7 +773,7 @@ export default function DashboardPage() {
                                         <div className="flex items-center gap-3 mb-8"><ArrowDownCircle className="text-orange-400" size={24} /> <h2 className="text-xl font-bold">Withdraw Funds</h2></div>
                                         <div className="space-y-6">
                                             <input type="text" placeholder="Recipient 0x..." value={withdrawAddress} onChange={(e) => setWithdrawAddress(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 text-white outline-none" />
-                                            <input type="number" placeholder="Amount" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 text-white outline-none" />
+                                            <input type="number" placeholder="Amount" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 text-white outline-none" min="0" />
                                             <div className="flex items-center gap-3"><input type="checkbox" checked={isERC20Withdraw} onChange={(e) => setIsERC20Withdraw(e.target.checked)} className="accent-violet-500" /> <span className="text-sm">Withdraw ERC20?</span></div>
                                             {isERC20Withdraw && <input type="text" placeholder="Token Address 0x..." value={withdrawTokenAddress} onChange={(e) => setWithdrawTokenAddress(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-white outline-none" />}
                                             <button onClick={handleWithdraw} disabled={!withdrawAddress || !withdrawAmount} className="w-full py-4 rounded-xl bg-white text-black font-bold hover:bg-zinc-200 disabled:opacity-50">Withdraw</button>
@@ -695,7 +785,7 @@ export default function DashboardPage() {
                                     <div className="bg-white/5 rounded-3xl border border-white/10 p-8">
                                         <h2 className="text-xl font-bold mb-4">Configuration</h2>
                                         <div className="mb-4">Current Min: {minContribution ? formatEther(minContribution) : '...'} ETH</div>
-                                        <input type="number" placeholder="New Min ETH" value={newMinContribution} onChange={(e) => setNewMinContribution(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-3 mb-4 text-white" />
+                                        <input type="number" placeholder="New Min ETH" value={newMinContribution} onChange={(e) => setNewMinContribution(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-3 mb-4 text-white" min="0" />
                                         <button onClick={handleSetMin} className="w-full bg-violet-600 py-3 rounded-xl font-bold">Update Minimum</button>
                                     </div>
 
@@ -892,6 +982,13 @@ export default function DashboardPage() {
                                                     <Mail size={16} />
                                                 </button>
                                                 <button
+                                                    onClick={(e) => { e.stopPropagation(); handleOpenQuota(u); }}
+                                                    className="p-2 text-zinc-500 hover:text-white bg-white/5 rounded-lg border border-white/10 transition-all mr-2"
+                                                    title="Manage Quota"
+                                                >
+                                                    <Settings size={16} />
+                                                </button>
+                                                <button
                                                     onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'user', data: u }); }}
                                                     className="p-2 text-zinc-500 hover:text-white bg-white/5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-all"
                                                 >
@@ -1067,6 +1164,84 @@ export default function DashboardPage() {
 
             </main>
 
+            {/* Quota Management Modal */}
+            <AnimatePresence>
+                {quotaModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                        <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-lg shadow-2xl relative">
+                            <button onClick={() => setQuotaModalOpen(false)} className="absolute top-6 right-6 p-2 text-zinc-500 hover:text-white"><X size={20} /></button>
+                            <h2 className="text-2xl font-bold mb-6">Manage User</h2>
+
+                            {/* Account Status Badge */}
+                            <div className="mb-6 p-4 rounded-xl bg-white/5 border border-white/10">
+                                <div className="text-xs font-bold text-zinc-500 uppercase mb-1">Status</div>
+                                <div className="flex items-center gap-2">
+                                    <div className={`w-3 h-3 rounded-full ${quotaUser?.account_status === 'banned' ? 'bg-red-500' : 'bg-green-500'}`} />
+                                    <span className="text-lg font-mono">{quotaUser?.account_status?.toUpperCase() || 'ACTIVE'}</span>
+                                    {quotaUser?.account_status === 'banned' && (
+                                        <span className="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded ml-2">
+                                            {quotaUser?.ban_reason}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <form onSubmit={handleSaveQuota} className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Monthly Quota</label>
+                                    <input type="number" value={quotaMonthly} onChange={e => setQuotaMonthly(Number(e.target.value))} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500 outline-none" placeholder="1000" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Override (Optional)</label>
+                                    <input type="number" value={quotaOverride} onChange={e => setQuotaOverride(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:border-violet-500 outline-none" placeholder="No Override" />
+                                </div>
+
+                                <div className="flex gap-2 pt-2">
+                                    <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-500 text-white font-bold py-3 rounded-xl">Save Quota</button>
+                                    <button type="button" onClick={handleRestoreQuota} className="px-4 bg-white/5 hover:bg-white/10 text-zinc-400 font-bold py-3 rounded-xl" title="Restore Default">
+                                        <RefreshCw size={18} />
+                                    </button>
+                                </div>
+                            </form>
+
+                            {/* Danger Zone */}
+                            <div className="mt-8 pt-6 border-t border-white/10">
+                                <h3 className="text-red-500 font-bold text-sm uppercase mb-4 flex items-center gap-2"><Ban size={16} /> Danger Zone</h3>
+
+                                {quotaUser?.account_status === 'banned' ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleUnbanUser}
+                                        className="w-full bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/50 font-bold py-3 rounded-xl transition-all"
+                                    >
+                                        Unban Account
+                                    </button>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <input
+                                            value={banReason}
+                                            onChange={e => setBanReason(e.target.value)}
+                                            placeholder="Reason for ban..."
+                                            className="w-full bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-red-200 placeholder:text-red-500/40 focus:border-red-500 outline-none"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleBanUser}
+                                            className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-bold py-3 rounded-xl transition-all"
+                                        >
+                                            Ban Account
+                                        </button>
+                                        <div className="text-center">
+                                            <button onClick={handleSuspendUser} className="text-xs text-zinc-500 hover:text-zinc-300 underline">Just suspend quota (soft block)</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
             {/* API Key Modal */}
             <AnimatePresence>
                 {isKeyModalOpen && (
@@ -1126,6 +1301,120 @@ export default function DashboardPage() {
                             <div className="flex gap-3">
                                 <button onClick={() => setInvModalOpen(false)} className="flex-1 py-3 font-bold text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl">Cancel</button>
                                 <button onClick={confirmInvalidate} disabled={!invReason} className="flex-1 py-3 font-bold text-white bg-red-600 hover:bg-red-500 rounded-xl disabled:opacity-50">Confirm</button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Verification Modal */}
+            <AnimatePresence>
+                {verifModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                        <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-2xl relative">
+                            <button onClick={() => setVerifModalOpen(false)} className="absolute top-6 right-6 p-2 text-zinc-500 hover:text-white"><X size={20} /></button>
+                            <h2 className="text-2xl font-bold mb-6 text-white flex items-center gap-2"><Mail size={24} className="text-violet-500" /> Send Verification</h2>
+
+                            <div className="mb-6 bg-white/5 p-4 rounded-xl border border-white/10">
+                                <div className="text-xs font-bold text-zinc-500 uppercase">User</div>
+                                <div className="font-bold text-white">{verifTargetUser?.name || verifTargetUser?.email || 'Unknown User'}</div>
+                                <div className="text-sm text-zinc-400">{verifTargetUser?.email}</div>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Token Expiry (Minutes)</label>
+                                    <input
+                                        type="number"
+                                        value={verifExpiry}
+                                        onChange={e => setVerifExpiry(Number(e.target.value))}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none"
+                                        min="1"
+                                        max="1440"
+                                        required
+                                    />
+                                    <p className="text-xs text-zinc-500 mt-2">Default is 15 minutes. Max is 24 hours.</p>
+                                </div>
+
+                                <button
+                                    onClick={handleSendVerification}
+                                    className="w-full rounded-xl bg-violet-600 py-3.5 text-sm font-bold text-white hover:bg-violet-500 shadow-lg shadow-violet-500/20 active:scale-95 transition-all"
+                                >
+                                    Send Email
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Quota Management Modal */}
+            <AnimatePresence>
+                {quotaModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-lg shadow-2xl relative max-h-[85vh] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-white/5 [&::-webkit-scrollbar-thumb]:bg-white/20 hover:[&::-webkit-scrollbar-thumb]:bg-white/30"
+                        >
+                            <button onClick={() => setQuotaModalOpen(false)} className="absolute top-6 right-6 p-2 text-zinc-500 hover:text-white"><X size={20} /></button>
+                            <h2 className="text-2xl font-bold mb-6 text-white flex items-center gap-2"><Settings size={24} className="text-violet-500" /> Manage Quota</h2>
+
+                            <div className="mb-6 bg-white/5 p-4 rounded-xl border border-white/10">
+                                <div className="text-xs font-bold text-zinc-500 uppercase">User</div>
+                                <div className="font-bold text-white text-lg">{quotaUser?.name || quotaUser?.email || 'Unknown User'}</div>
+                                <div className="font-mono text-xs text-zinc-400">{quotaUser?.id}</div>
+                            </div>
+
+                            <form onSubmit={handleSaveQuota} className="space-y-6">
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Monthly Request Limit</label>
+                                    <input type="number" value={quotaMonthly} onChange={e => setQuotaMonthly(Number(e.target.value))} className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none" min="0" required />
+                                    <p className="text-xs text-zinc-500 mt-2">Standard monthly allocation.</p>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Quota Override (Optional)</label>
+                                    <input type="number" value={quotaOverride} onChange={e => setQuotaOverride(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none" placeholder="Default (Inherit)" min="0" />
+                                    <p className="text-xs text-zinc-500 mt-2">Set to 0 to suspend. Leave empty/null to use monthly limit.</p>
+                                </div>
+
+                                <div className="flex gap-3 pt-4 border-t border-white/10">
+                                    <button type="button" onClick={handleSuspendUser} className="flex-1 py-3 px-4 rounded-xl bg-red-500/10 text-red-500 font-bold hover:bg-red-500/20 border border-red-500/20 transition-all text-sm">Suspend User</button>
+                                    <button type="button" onClick={handleRestoreQuota} className="flex-1 py-3 px-4 rounded-xl bg-white/5 text-zinc-400 font-bold hover:text-white hover:bg-white/10 transition-all text-sm">Restore Default</button>
+                                </div>
+
+                                <button type="submit" className="w-full rounded-xl bg-violet-600 py-3.5 text-sm font-bold text-white hover:bg-violet-500 shadow-lg shadow-violet-500/20">Save Configuration</button>
+                            </form>
+
+                            {/* Danger Zone */}
+                            <div className="mt-8 pt-6 border-t border-white/10">
+                                <h3 className="text-red-500 font-bold text-sm uppercase mb-4 flex items-center gap-2"><Ban size={16} /> Danger Zone</h3>
+
+                                {quotaUser?.account_status === 'banned' ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleUnbanUser}
+                                        className="w-full bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/50 font-bold py-3 rounded-xl transition-all"
+                                    >
+                                        Unban Account
+                                    </button>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <input
+                                            value={banReason}
+                                            onChange={e => setBanReason(e.target.value)}
+                                            placeholder="Reason for ban..."
+                                            className="w-full bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-red-200 placeholder:text-red-500/40 focus:border-red-500 outline-none"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleBanUser}
+                                            className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-bold py-3 rounded-xl transition-all"
+                                        >
+                                            Ban Account
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     </div>
@@ -1430,7 +1719,7 @@ function UserLogsView({ userId }: { userId: string }) {
                                 <td className="p-3">
                                     <span className={l.status_code < 400 ? 'text-green-500' : 'text-red-500'}>{l.status_code}</span>
                                 </td>
-                                <td className="p-3 truncate max-w-[150px]">{l.path || '/check'}</td>
+                                <td className="p-3 truncate max-w-[150px]">{l.endpoint || '/check'}</td>
                             </tr>
                         ))}
                         {logs.length === 0 && !loading && <tr><td colSpan={3} className="p-4 text-center text-zinc-600 italic">No recent activity.</td></tr>}

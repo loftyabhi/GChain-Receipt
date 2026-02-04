@@ -36,8 +36,9 @@ export class EmailQueueService {
     }) {
         const { userId, recipientEmail, category, templateId, metadata, priority = 'normal' } = params;
 
-        // 1. Strict Verification Check
-        if (userId) {
+        // 1. Strict Verification Check (Only for Promotional Emails)
+        // Transactional emails (like verification) MUST go through regardless
+        if (userId && category === 'promotional') {
             const { data: user } = await supabase
                 .from('users')
                 .select('is_email_verified')
@@ -45,8 +46,8 @@ export class EmailQueueService {
                 .single();
 
             if (user && !user.is_email_verified) {
-                logger.warn('Skipping email enqueue for unverified user', { userId, recipientEmail, category });
-                throw new Error('Cannot send email to unverified user.');
+                logger.warn('Skipping promotional email for unverified user', { userId, recipientEmail });
+                throw new Error('Cannot send promotional emails to unverified users.');
             }
         }
 
@@ -54,7 +55,7 @@ export class EmailQueueService {
         const { data, error } = await supabase
             .from('email_jobs')
             .insert({
-                user_id: userId,
+                user_id: userId || null, // Ensure explicit null if undefined
                 recipient_email: recipientEmail,
                 category,
                 template_id: templateId,
@@ -66,10 +67,12 @@ export class EmailQueueService {
             .single();
 
         if (error) {
+            console.error('❌ [EmailQueue] Insert Error:', error);
             logger.error('Failed to enqueue email job', error);
             throw new Error('Failed to queue email.');
         }
 
+        console.log('✅ [EmailQueue] Insert Success:', data);
         logger.info('Enqueued email job', { jobId: data.id, recipientEmail, priority });
         return data;
     }

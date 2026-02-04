@@ -105,7 +105,7 @@ export class EmailService {
     }
 
     async sendVerificationEmail(email: string, token: string, expiryMinutes: number = 15) {
-        const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify/${token}`;
+        const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify?token=${token}`;
 
         const { html, text } = this.renderFileTemplate('verification', {
             subject: 'Verify Your Email - TxProof Developers',

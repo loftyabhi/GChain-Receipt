@@ -2,7 +2,7 @@
 
 import { Navbar } from '@/components/Navbar';
 import { motion } from 'framer-motion';
-import { Scale, Book, AlertCircle, FileCheck } from 'lucide-react';
+import { Scale, Book, AlertCircle, FileCheck, Shield } from 'lucide-react';
 
 export default function TermsOfServiceClient() {
     return (
@@ -20,14 +20,12 @@ export default function TermsOfServiceClient() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
-                    className="mb-12"
+                    className="mb-12 border-b border-white/10 pb-8 text-center md:text-left"
                 >
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700 text-zinc-300 text-xs font-medium mb-6">
-                        <Scale size={14} />
-                        <span>Legal Agreement</span>
-                    </div>
-                    <h1 className="text-4xl md:text-5xl font-bold mb-4">Terms of Service</h1>
-                    <p className="text-zinc-400">Last updated: {new Date().toLocaleDateString()}</p>
+                    <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">Terms of Service</h1>
+                    <p className="text-lg text-zinc-400">
+                        Last Updated: February 04, 2026
+                    </p>
                 </motion.div>
 
                 <motion.div
@@ -56,20 +54,19 @@ export default function TermsOfServiceClient() {
                                 <div className="p-2 rounded-lg bg-white/5">
                                     <Book className="w-5 h-5 text-violet-400" />
                                 </div>
-                                <h2 className="text-xl font-semibold text-white">2. Use License</h2>
+                                <h2 className="text-xl font-semibold text-white">2. Usage & Fair Use Policy</h2>
                             </div>
                             <div className="pl-12 border-l border-white/5 ml-3 space-y-4">
                                 <p>
-                                    Permission is granted to temporarily download one copy of the materials (information or software) on TxProof's website for personal,
-                                    non-commercial transitory viewing only. This is the grant of a license, not a transfer of title, and under this license you may not:
+                                    TxProof provides tools for generating verifiable transaction receipts. Your usage of our API and platform is subject to the following conditions:
                                 </p>
                                 <ul className="grid gap-2 pt-2 text-sm text-zinc-400">
                                     {[
-                                        "Modify or copy the materials;",
-                                        "Use the materials for any commercial purpose, or for any public display;",
-                                        "Attempt to decompile or reverse engineer any software contained on TxProof's website;",
-                                        "Remove any copyright or other proprietary notations from the materials;",
-                                        "Transfer the materials to another person or 'mirror' the materials on any other server."
+                                        "You may not use the platform for any illegal or fraudulent activities.",
+                                        "You may not attempt to reverse engineer the receipt generation logic or cryptographic signing processes.",
+                                        "You may not bypass API rate limits or quota enforcement mechanisms.",
+                                        "Duplicate email verification attempts across multiple wallets for the purpose of quota stacking are strictly prohibited.",
+                                        "Automated harvesting of receipts or bulk generation that strains system resources may result in immediate suspension."
                                     ].map((item, i) => (
                                         <li key={i} className="flex items-center gap-3">
                                             <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 shrink-0" />
@@ -83,26 +80,32 @@ export default function TermsOfServiceClient() {
                         <section>
                             <div className="flex items-center gap-3 mb-4">
                                 <div className="p-2 rounded-lg bg-white/5">
-                                    <AlertCircle className="w-5 h-5 text-amber-500/80" />
+                                    <Shield className="w-5 h-5 text-red-400" />
                                 </div>
-                                <h2 className="text-xl font-semibold text-white">3. Disclaimer</h2>
+                                <h2 className="text-xl font-semibold text-white">3. API Quotas & Account Status</h2>
                             </div>
-                            <div className="pl-12 border-l border-white/5 ml-3">
+                            <div className="pl-12 border-l border-white/5 ml-3 space-y-4">
                                 <p>
-                                    The materials on TxProof's website are provided on an 'as is' basis. TxProof makes no warranties, expressed or implied,
-                                    and hereby disclaims and negates all other warranties including, without limitation, implied warranties or conditions of merchantability,
-                                    fitness for a particular purpose, or non-infringement of intellectual property or other violation of rights.
+                                    Usage is governed by a meritocratic quota system. Each account is assigned a strictly enforced monthly request limit.
                                 </p>
+                                <ul className="list-disc pl-5 space-y-2 text-sm text-zinc-400">
+                                    <li><strong>Quota Enforcement:</strong> Once your monthly limit is reached, service will be restricted until the next billing cycle or an override is granted.</li>
+                                    <li><strong>Account Banning:</strong> We reserve the absolute right to ban wallets and associated email addresses from the platform if we detect malicious intent, sybil attacks, or repeated terms violations.</li>
+                                    <li><strong>Verification:</strong> To access higher limits, users may be required to verify their email. A verified email can only be linked to a single wallet address.</li>
+                                </ul>
                             </div>
                         </section>
 
                         <section>
-                            <h2 className="text-xl font-semibold text-white mb-4 pl-14">4. Limitations</h2>
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 rounded-lg bg-white/5">
+                                    <AlertCircle className="w-5 h-5 text-amber-500/80" />
+                                </div>
+                                <h2 className="text-xl font-semibold text-white">4. Disclaimer</h2>
+                            </div>
                             <div className="pl-12 border-l border-white/5 ml-3">
                                 <p>
-                                    In no event shall TxProof or its suppliers be liable for any damages (including, without limitation, damages for loss of data or profit,
-                                    or due to business interruption) arising out of the use or inability to use the materials on TxProof's website, even if TxProof
-                                    or a TxProof authorized representative has been notified orally or in writing of the possibility of such damage.
+                                    Receipts generated by TxProof are deterministic and based on public blockchain data. While we strive for 100% cryptographic accuracy, materials are provided on an 'as is' basis. TxProof makes no warranties, expressed or implied, regarding the external legal acceptance of these receipts in any specific jurisdiction.
                                 </p>
                             </div>
                         </section>
@@ -111,7 +114,7 @@ export default function TermsOfServiceClient() {
                             <h2 className="text-xl font-semibold text-white mb-4 pl-14">5. Contributions & Support</h2>
                             <div className="pl-12 border-l border-white/5 ml-3">
                                 <p>
-                                    Any contributions, donations, or financial support provided to TxProof are voluntary and non-refundable. Support fees do not grant equity, voting rights, or control over the project's direction. We reserve the right to modify or discontinue any aspect of the service at any time without liability.
+                                    Any contributions or donations provided to TxProof are voluntary and non-refundable. Support fees do not grant equity or voting rights. We reserve the right to modify or discontinue any aspect of the service at any time.
                                 </p>
                             </div>
                         </section>

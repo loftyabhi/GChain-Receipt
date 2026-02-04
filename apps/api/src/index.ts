@@ -160,8 +160,14 @@ const setupPublicRoutes = (app: express.Application) => {
     // 4. Get Bill JSON Data (Restricted Public Fallback)
     app.get('/api/v1/bills/:billId/data', hybridAuthWithTracking, async (req: Request, res: Response) => {
         const { billId } = req.params;
-        const hybridReq = req as any; // Access isPublicRequest flag
-        const jsonKey = billId.endsWith('.json') ? billId : `${billId}.json`;
+        const hybridReq = req as any; // Access isPublicRequest
+        // Normalization: Canonical ID is uppercase BILL-
+        // Windows Dev environments or some browsers might lowercase the URL
+        let jsonKey = billId;
+        if (billId.startsWith('bill-')) {
+            jsonKey = 'BILL-' + billId.slice(5);
+        }
+        jsonKey += '.json';
 
         try {
             // 1. Storage Check (Allowed for PUBLIC + AUTHED)
@@ -244,12 +250,13 @@ const setupPrivateRoutes = (app: express.Application) => {
             }
 
             const { txHash, chainId, connectedWallet } = validation.data;
-            const apiKeyId = (req as any).auth?.id; // Guaranteed by saasMiddleware
+            const apiKeyId = (req as any).auth?.id; // Public API Context
+            const userId = (req as any).user?.id;   // Internal User Context
 
-            logger.info('Enqueueing bill request', { txHash, chainId, apiKeyId });
+            logger.info('Enqueueing bill request', { txHash, chainId, apiKeyId, userId });
 
-            // Pass apiKeyId to enqueue for robust worker checking
-            const job = await softQueueService.enqueue(txHash, chainId, { connectedWallet, apiKeyId });
+            // Pass apiKeyId OR userId to enqueue for robust worker checking
+            const job = await softQueueService.enqueue(txHash, chainId, { connectedWallet, apiKeyId, userId });
 
             setImmediate(() => softQueueService.processNext().catch(e => logger.error('Queue processing error', { error: e.message })));
 

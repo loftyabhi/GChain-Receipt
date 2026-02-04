@@ -73,27 +73,29 @@ export default function FeaturesClient() {
 
             <main className="relative z-10 pt-32 pb-20 px-6 max-w-7xl mx-auto">
 
-                {/* Hero Section */}
-                <div className="text-center mb-24 max-w-4xl mx-auto">
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5 }}
-                    >
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs font-bold tracking-wide uppercase mb-6 shadow-sm backdrop-blur-sm">
-                            <Code2 size={14} />
-                            Infrastructure Roadmap
-                        </div>
+                {/* Standardized Header */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="mb-12 border-b border-white/10 pb-8 text-center md:text-left"
+                >
+                    <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">Features & Capabilities</h1>
+                    <p className="text-lg text-zinc-400">
+                        Last Updated: February 04, 2026
+                    </p>
+                </motion.div>
 
-                        <h1 className="text-5xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60 leading-[1.1] mb-8 tracking-tight">
-                            Deterministic <br className="hidden md:block" /> Intelligence.
-                        </h1>
-
-                        <p className="text-xl text-zinc-400 leading-relaxed max-w-2xl mx-auto">
-                            TxProof provides deterministic, privacy-first blockchain documentation infrastructure. We transform raw on-chain data into audit-ready financial records without compromising user privacy or relying on centralized storage.
-                        </p>
-                    </motion.div>
-                </div>
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1, duration: 0.5 }}
+                    className="mb-20 max-w-4xl"
+                >
+                    <p className="text-xl text-zinc-400 leading-relaxed">
+                        TxProof provides deterministic, privacy-first blockchain documentation infrastructure. We transform raw on-chain data into audit-ready financial records without compromising user privacy or relying on centralized storage.
+                    </p>
+                </motion.div>
 
                 {/* Features Grid - Refined */}
                 <motion.div
@@ -130,7 +132,7 @@ export default function FeaturesClient() {
                         {
                             icon: <Code2 className="text-pink-400" size={32} />,
                             title: "Developer API",
-                            desc: "Programmatic access for high-volume receipt generation. (Currently in closed beta).",
+                            desc: "Programmatic access for high-volume receipt generation and audit-grade documentation.",
                             color: "pink"
                         },
                         {
@@ -190,8 +192,8 @@ export default function FeaturesClient() {
                         {/* Phase 2 */}
                         <div className="p-8 rounded-3xl bg-zinc-900/50 border border-white/10 relative overflow-hidden">
                             <div className="flex items-center justify-between mb-6">
-                                <span className="text-xs font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full uppercase tracking-wide">
-                                    In Progress
+                                <span className="text-xs font-bold text-green-400 bg-green-500/10 border border-green-500/20 px-3 py-1 rounded-full uppercase tracking-wide">
+                                    Live
                                 </span>
                                 <span className="text-zinc-500 font-mono text-xs">Phase 2</span>
                             </div>
@@ -202,6 +204,7 @@ export default function FeaturesClient() {
                             <ul className="space-y-3">
                                 {[
                                     "Infrastructure hardening",
+                                    "Public Developer APIs",
                                     "Caching & throughput improvements",
                                     "Multi-chain scale readiness",
                                     "Rate-limit protection",
@@ -255,7 +258,6 @@ export default function FeaturesClient() {
                             </p>
                             <ul className="space-y-3">
                                 {[
-                                    "Public APIs for intelligence",
                                     "Bulk / programmatic generation",
                                     "Organization & team workflows",
                                     "Feature prioritization governance",

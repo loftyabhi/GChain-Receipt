@@ -17,9 +17,10 @@ const breadcrumbs = [
 ];
 
 const faqs = [
-    { question: 'What is Zero-Knowledge Privacy?', answer: 'It allows you to verify the validity of a transaction without revealing the sensitive inputs, ensuring confidentiality for enterprise operations.' },
-    { question: 'Do you offer Developer APIs?', answer: 'Yes, we provide REST and GraphQL APIs for seamless integration with your existing financial stack.' },
-    { question: 'Which chains satisfy the Multi-Chain Support?', answer: 'We currently support Ethereum, Polygon, Arbitrum, Optimism, and are continuously adding more EVM-compatible networks.' },
+    { question: 'Is TxProof free to use?', answer: 'Base features including single transaction analysis and standard PDF downloads are free. Advanced features and API access may require a subscription.' },
+    { question: 'Which blockchains are supported?', answer: 'We currently support major EVM-compatible chains including Ethereum, Base, Polygon, Arbitrum, Optimism, and Binance Smart Chain.' },
+    { question: 'Is my data stored?', answer: 'No. TxProof operates on a privacy-first, client-side model. We analyze on-chain data on-demand and do not store your transaction history.' },
+    { question: 'Can I use the API for my application?', answer: 'Yes. Our Developer API allows you to integrate receipt generation directly into your dApp or wallet. Contact us for access keys.' },
 ];
 
 export default function FeaturesPage() {

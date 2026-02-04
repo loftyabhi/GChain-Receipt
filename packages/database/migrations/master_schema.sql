@@ -180,12 +180,24 @@ CREATE TABLE IF NOT EXISTS users (
     primary_api_key_id UUID REFERENCES api_keys(id),
     social_config JSONB DEFAULT '{}'::jsonb,
     bills_generated INT DEFAULT 0,
+    -- Quota Management
+    monthly_quota INT NOT NULL DEFAULT 1000,
+    quota_override INT,
+    -- Account Status & Bans
+    account_status TEXT DEFAULT 'active' CHECK (account_status IN ('active', 'suspended', 'banned')),
+    ban_reason TEXT,
+    banned_at TIMESTAMPTZ,
+    banned_by UUID,
+    -- Marketing
+    allow_promotional_emails BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_primary_api_key ON users(primary_api_key_id);
+CREATE INDEX IF NOT EXISTS idx_users_account_status ON users(account_status) WHERE account_status != 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS unique_verified_email ON users (LOWER(email)) WHERE is_email_verified = true;
 
 -- 4.2 EMAIL VERIFICATION TOKENS
 CREATE TABLE IF NOT EXISTS email_verification_tokens (
@@ -252,7 +264,8 @@ CREATE TABLE IF NOT EXISTS bills (
     is_deleted BOOLEAN DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT bills_tx_chain_unique UNIQUE (tx_hash, chain_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_bills_tx_hash ON bills(tx_hash, chain_id);
@@ -318,6 +331,7 @@ CREATE TABLE IF NOT EXISTS bill_jobs (
     bill_id TEXT,
     error TEXT,
     api_key_id UUID REFERENCES api_keys(id),
+    user_id UUID REFERENCES users(id),
     priority INT DEFAULT 0,
     metadata JSONB DEFAULT '{}',
     started_at TIMESTAMPTZ,
@@ -350,10 +364,21 @@ CREATE TABLE IF NOT EXISTS pending_contributions (
 -- 6. OBSERVABILITY & ANALYTICS
 -- -----------------------------------------------------------------------------
 
--- 6.1 API USAGE (Real-time tracking)
-CREATE TABLE IF NOT EXISTS api_usage (
+-- 6.1 USAGE EVENTS (Real-time tracking)
+DO $$ BEGIN
+    CREATE TYPE usage_scope_type AS ENUM ('user', 'api_key', 'public');
+EXCEPTION
+    WHEN duplicate_object THEN 
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'usage_scope_type' AND 'public' = ANY(enum_range(NULL::usage_scope_type)::text[])) THEN
+            ALTER TYPE usage_scope_type ADD VALUE 'public';
+        END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS usage_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope usage_scope_type NOT NULL DEFAULT 'api_key',
     api_key_id UUID REFERENCES api_keys(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     endpoint TEXT NOT NULL,
     method TEXT NOT NULL,
     status_code INT NOT NULL,
@@ -364,20 +389,31 @@ CREATE TABLE IF NOT EXISTS api_usage (
     ip_address INET,
     metadata JSONB DEFAULT '{}'::jsonb,
     error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT usage_events_scope_check 
+        CHECK ((scope = 'api_key' AND api_key_id IS NOT NULL) OR (scope = 'user' AND user_id IS NOT NULL))
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_usage_key_created ON api_usage(api_key_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_api_usage_endpoint ON api_usage(endpoint);
-CREATE INDEX IF NOT EXISTS idx_api_usage_status ON api_usage(status_code);
+CREATE INDEX IF NOT EXISTS idx_usage_events_key_created ON usage_events(api_key_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_user_created ON usage_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_endpoint ON usage_events(endpoint);
 
 -- 6.2 USAGE AGGREGATES (Quota enforcement)
-CREATE TABLE IF NOT EXISTS api_usage_aggregates (
+CREATE TABLE IF NOT EXISTS usage_aggregates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope usage_scope_type NOT NULL DEFAULT 'api_key',
     api_key_id UUID REFERENCES api_keys(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     period_start DATE NOT NULL,
     request_count INT DEFAULT 0,
-    PRIMARY KEY (api_key_id, period_start)
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT usage_aggregates_scope_check
+        CHECK ((scope = 'api_key' AND api_key_id IS NOT NULL AND user_id IS NULL) OR (scope = 'user' AND user_id IS NOT NULL AND api_key_id IS NULL))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_aggs_apikey ON usage_aggregates(api_key_id, period_start) WHERE scope = 'api_key';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_aggs_user ON usage_aggregates(user_id, period_start) WHERE scope = 'user';
 
 -- 6.3 API LOGS (Detailed debugging)
 CREATE TABLE IF NOT EXISTS api_logs (
@@ -416,8 +452,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 -- Enable RLS globally
 ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE api_usage ENABLE ROW LEVEL SECURITY;
-ALTER TABLE api_usage_aggregates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_aggregates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bill_jobs ENABLE ROW LEVEL SECURITY;
@@ -459,7 +495,10 @@ CREATE POLICY "Users read own profile" ON users
 CREATE POLICY "Service manages everything" ON bills FOR ALL 
     USING (auth.role() = 'service_role' OR current_user = 'postgres' OR current_user = 'postgres.avklfjqhpizielvnkwyh');
 
-CREATE POLICY "Service manages api_usage" ON api_usage FOR ALL 
+CREATE POLICY "Service manages usage_events" ON usage_events FOR ALL 
+    USING (auth.role() = 'service_role' OR current_user = 'postgres' OR current_user = 'postgres.avklfjqhpizielvnkwyh');
+
+CREATE POLICY "Service manages usage_aggregates" ON usage_aggregates FOR ALL 
     USING (auth.role() = 'service_role' OR current_user = 'postgres' OR current_user = 'postgres.avklfjqhpizielvnkwyh');
 
 CREATE POLICY "Service manages jobs" ON bill_jobs FOR ALL 
@@ -542,17 +581,60 @@ BEGIN
 END;
 $$;
 
--- 8.2 QUOTA INCREMENT
+-- 8.2 QUOTA INCREMENT (Unified Scope)
+CREATE OR REPLACE FUNCTION increment_usage(
+    p_scope usage_scope_type,
+    p_id UUID,
+    p_cost INT DEFAULT 1
+)
+RETURNS TABLE (allowed BOOLEAN, used INT, limit_val INT, remaining INT) LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+    v_limit INT := 1000; -- Fallback
+    v_current INT;
+    v_month DATE := DATE_TRUNC('month', NOW())::DATE;
+BEGIN
+    -- Resolve Limit based on Scope
+    IF p_scope = 'api_key' THEN
+        SELECT COALESCE(k.quota_limit, p.monthly_quota, 100) INTO v_limit 
+        FROM api_keys k LEFT JOIN plans p ON k.plan_id = p.id 
+        WHERE k.id = p_id;
+    ELSIF p_scope = 'user' THEN
+        -- Strict User Quota: Override > Monthly > Default
+        SELECT COALESCE(u.quota_override, u.monthly_quota, 1000) INTO v_limit
+        FROM users u
+        WHERE u.id = p_id;
+    END IF;
+
+    -- Upsert Aggregate
+    IF p_scope = 'api_key' THEN
+        INSERT INTO usage_aggregates (scope, api_key_id, period_start, request_count)
+        VALUES ('api_key', p_id, v_month, p_cost)
+        ON CONFLICT (api_key_id, period_start) WHERE scope = 'api_key'
+        DO UPDATE SET request_count = usage_aggregates.request_count + p_cost
+        RETURNING request_count INTO v_current;
+    ELSE
+        INSERT INTO usage_aggregates (scope, user_id, period_start, request_count)
+        VALUES ('user', p_id, v_month, p_cost)
+        ON CONFLICT (user_id, period_start) WHERE scope = 'user'
+        DO UPDATE SET request_count = usage_aggregates.request_count + p_cost
+        RETURNING request_count INTO v_current;
+    END IF;
+
+    RETURN QUERY SELECT (v_current <= v_limit), v_current, v_limit, (v_limit - v_current);
+END;
+$$;
+
+-- Legacy shim for increment_api_usage
 CREATE OR REPLACE FUNCTION increment_api_usage(p_key_id UUID, p_cost INT DEFAULT 1)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
 DECLARE
     v_quota INT; v_current INT; v_month DATE := DATE_TRUNC('month', NOW())::DATE;
 BEGIN
     SELECT p.monthly_quota INTO v_quota FROM api_keys k JOIN plans p ON k.plan_id = p.id WHERE k.id = p_key_id;
-    INSERT INTO api_usage_aggregates (api_key_id, period_start, request_count)
-    VALUES (p_key_id, v_month, p_cost)
-    ON CONFLICT (api_key_id, period_start)
-    DO UPDATE SET request_count = api_usage_aggregates.request_count + p_cost
+    INSERT INTO usage_aggregates (api_key_id, period_start, request_count, scope)
+    VALUES (p_key_id, v_month, p_cost, 'api_key')
+    ON CONFLICT (api_key_id, period_start) WHERE scope = 'api_key'
+    DO UPDATE SET request_count = usage_aggregates.request_count + p_cost
     RETURNING request_count INTO v_current;
     RETURN v_current <= v_quota;
 END;
@@ -611,8 +693,8 @@ FROM bill_jobs WHERE finished_at > NOW() - INTERVAL '24 hours' GROUP BY 1;
 -- ============================================================================
 
 -- 10.1 USER PREFERENCES (Extension)
-ALTER TABLE users 
-ADD COLUMN IF NOT EXISTS allow_promotional_emails BOOLEAN DEFAULT FALSE;
+-- Columns added to users table in 4.1 section above.
+
 
 -- 10.2 EMAIL TEMPLATES (Admin Managed)
 CREATE TABLE IF NOT EXISTS email_templates (
@@ -625,6 +707,19 @@ CREATE TABLE IF NOT EXISTS email_templates (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Insert standard verification template
+INSERT INTO email_templates (name, subject, html_content, category, is_active)
+VALUES (
+    'admin-verification', 
+    'Verify Your Email - TxProof Developers',
+    '<h1 style="margin: 0; margin-bottom: 24px; font-size: 28px; font-weight: 700; color: #ffffff;">Verify your email to activate your TxProof account</h1><p style="margin: 0; margin-bottom: 32px; font-size: 16px; line-height: 1.6; color: #bbbbbb;">Hi there,<br><br>You''re one step away from using TxProof to generate verifiable blockchain receipts and production-ready transaction proofs.<br><br>Confirm your email address to activate your developer account and start issuing cryptographically secure receipts.</p><div align="center" style="margin-bottom: 32px;"><!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{verifyUrl}}" style="height:52px;v-text-anchor:middle;width:240px;" arcsize="24%" stroke="f" fillcolor="#7c3aed"><w:anchorlock/><center><![endif]--><a href="{{verifyUrl}}" class="hover-bg-violet-500" style="background-color: #7c3aed; border-radius: 12px; color: #ffffff; display: inline-block; font-size: 16px; font-weight: 700; line-height: 52px; text-align: center; text-decoration: none; width: 240px; -webkit-text-size-adjust: none;">Activate My Account</a><!--[if mso]></center></v:roundrect><![endif]--></div><p style="margin: 0; margin-bottom: 32px; font-size: 14px; line-height: 1.6; color: #666666; text-align: center;">For security, this link expires in <strong>{{expiryMinutes}} minutes</strong>.</p><div style="background-color: #1a1a1a; border-radius: 12px; padding: 16px; margin-bottom: 0;"><p style="margin: 0; font-size: 12px; color: #888888; word-break: break-all;"><strong>If the button doesn’t work, copy and open this link in your browser:</strong><br><br><a href="{{verifyUrl}}" style="color: #7c3aed; text-decoration: none;">{{verifyUrl}}</a></p></div>',
+    'transactional',
+    true
+)
+ON CONFLICT (name) DO UPDATE SET 
+    html_content = EXCLUDED.html_content,
+    subject = EXCLUDED.subject;
 
 -- 10.3 EMAIL JOBS (Priority Queue with Analytics)
 CREATE TABLE IF NOT EXISTS email_jobs (
