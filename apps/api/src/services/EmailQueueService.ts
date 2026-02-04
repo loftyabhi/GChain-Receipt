@@ -4,7 +4,7 @@ import { EmailService } from './EmailService';
 import { AuditService } from './AuditService';
 
 const EMAIL_SEND_INTERVAL_MS = 2000;
-const MAX_EMAIL_ATTEMPTS = 5;
+const MAX_EMAIL_ATTEMPTS = 4; // 1 Initial + 3 Retries
 
 export class EmailQueueService {
     private emailService: EmailService;

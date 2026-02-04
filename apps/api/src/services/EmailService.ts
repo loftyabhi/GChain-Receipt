@@ -22,12 +22,16 @@ export class NodemailerProvider implements IEmailProvider {
     constructor() {
         this.transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 587,
-            secure: false, // true for 465, false for other ports
+            port: 465, // Implicit TLS
+            secure: true,
             auth: {
                 user: process.env.GMAIL_USER,
                 pass: process.env.GMAIL_PASS
-            }
+            },
+            // Aggressive Fail-Fast Timeouts
+            connectionTimeout: 10000, // 10s wait for connection
+            greetingTimeout: 5000,    // 5s wait for greeting
+            socketTimeout: 20000      // 20s inactive socket
         });
     }
 
@@ -106,6 +110,39 @@ export class EmailService {
         return this.render(contentHtml, contentText, data);
     }
 
+    private classifyError(error: any): { type: string; message: string; action: string } {
+        const code = error.code || '';
+        const command = error.command || '';
+
+        if (code === 'ETIMEDOUT') {
+            return {
+                type: 'SMTP_TIMEOUT',
+                message: 'Connection timed out. Network or Firewall issue.',
+                action: 'Check firewall/infra outbound 465 or consider HTTP API'
+            };
+        }
+        if (code === 'EAUTH' || command === 'AUTH') {
+            return {
+                type: 'SMTP_AUTH_FAILED',
+                message: 'Invalid credentials or App Password revoked',
+                action: 'Rotate App Password'
+            };
+        }
+        if (code === 'EHOSTUNREACH' || code === 'ECONNREFUSED') {
+            return {
+                type: 'SMTP_UNREACHABLE',
+                message: 'Host unreachable. DNS or Blocking issue.',
+                action: 'Check DNS or Proxy settings'
+            };
+        }
+
+        return {
+            type: 'SMTP_UNKNOWN',
+            message: error.message,
+            action: 'Investigate logs'
+        };
+    }
+
     async sendVerificationEmail(email: string, token: string, expiryMinutes: number = 15) {
         const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify?token=${token}`;
 
@@ -128,11 +165,20 @@ export class EmailService {
         };
 
         try {
+            logger.info('Starting email job', { to, subject });
             await this.provider.send(mailOptions);
             logger.info('Email sent successfully', { to, subject });
         } catch (error: any) {
-            logger.error('Failed to send email', { to, subject, error: error.message });
-            throw error;
+            const classified = this.classifyError(error);
+
+            logger.error('Failed to send email', {
+                to,
+                errorCategory: classified,
+                rawError: error.message
+            });
+
+            // Re-throw with clean message for queue/circuit breaker
+            throw new Error(`[${classified.type}] ${classified.message}`);
         }
     }
 
