@@ -1,23 +1,42 @@
 'use client';
 
-import { ArrowRight, Search, Loader2, Shield, CheckCircle, FileText } from 'lucide-react'; // Removed unused icons
+import { ArrowRight, Search, Loader2, Shield, CheckCircle, FileText, Lock, X } from 'lucide-react'; // Added Lock, X for modal
 import { useState } from 'react';
-import { useAccount } from 'wagmi';
-import { motion } from 'framer-motion';
+import { useAccount, useConnect } from 'wagmi'; // Added useConnect
+import { useRouter } from 'next/navigation'; // Added useRouter
+import { motion, AnimatePresence } from 'framer-motion'; // Added AnimatePresence for modal
 import AdBanner from '../AdBanner';
 import { toast } from 'sonner';
 import { trackTxLookup, trackEvent } from '@/lib/analytics';
 
 export function BillGenerator() {
-    const { address } = useAccount(); // removed isConnected if unused, but might be needed later
+    const { address, isConnected } = useAccount();
+    const { connect, connectors } = useConnect();
+    const router = useRouter();
     const [txHash, setTxHash] = useState('');
     const [loading, setLoading] = useState(false);
     const [billData, setBillData] = useState<any>(null);
     const [pdfUrl, setPdfUrl] = useState('');
     const [chainId, setChainId] = useState(8453);
+    const [showLoginModal, setShowLoginModal] = useState(false);
 
     const generateBill = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Security Gate: Check authentication
+        if (!isConnected || !address) {
+            setShowLoginModal(true);
+            return;
+        }
+
+        // Authenticated users: redirect to dashboard
+        toast.info("Redirecting to Dashboard for secure generation...");
+        router.push('/dashboard');
+        return;
+
+        // NOTE: The code below is kept for reference but won't execute due to redirect above
+        // This ensures homepage NEVER makes PDF API calls
+        /*
         if (!txHash) {
             toast.error("Please enter a transaction hash");
             return;
@@ -114,15 +133,112 @@ export function BillGenerator() {
             trackTxLookup(chainId.toString(), 'failed', err.message);
             toast.error(err.message, { id: toastId });
         }
-    };
+        */
+    }
 
     const handleChainChange = (newChainId: number) => {
         setChainId(newChainId);
         trackEvent('chain_selected', { chain: newChainId.toString() });
     };
 
+    const handleLogin = () => {
+        // Use the same priority connection strategy as Navbar
+        const preferred = connectors.find(c => c.name === 'MetaMask') || connectors.find(c => c.id === 'injected') || connectors[0];
+        if (preferred) {
+            connect({ connector: preferred });
+            setShowLoginModal(false);
+            toast.success("Wallet connected! Redirecting to Dashboard...");
+            setTimeout(() => router.push('/dashboard'), 1000);
+        } else {
+            toast.error('No suitable wallet connector found');
+        }
+    };
+
     return (
         <>
+            {/* Login Modal */}
+            <AnimatePresence>
+                {showLoginModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+                        onClick={() => setShowLoginModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="relative max-w-md w-full bg-[#0F0F11] rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
+                        >
+                            {/* Close Button */}
+                            <button
+                                onClick={() => setShowLoginModal(false)}
+                                className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors z-10"
+                                aria-label="Close modal"
+                            >
+                                <X size={24} />
+                            </button>
+
+                            {/* Background Gradient */}
+                            <div className="absolute top-0 right-0 w-48 h-48 bg-violet-600/20 rounded-full blur-[80px] -mr-16 -mt-16 pointer-events-none"></div>
+
+                            <div className="relative p-8">
+                                {/* Icon */}
+                                <div className="flex justify-center mb-6">
+                                    <div className="h-16 w-16 rounded-full bg-violet-600/10 border border-violet-500/20 flex items-center justify-center">
+                                        <Lock className="text-violet-400" size={32} />
+                                    </div>
+                                </div>
+
+                                {/* Title */}
+                                <h2 className="text-2xl font-bold text-white text-center mb-3">
+                                    Secure Sign In Required
+                                </h2>
+
+                                {/* Subtitle */}
+                                <p className="text-zinc-400 text-center mb-6">
+                                    Connect your wallet to generate professional blockchain receipts
+                                </p>
+
+                                {/* Security Message */}
+                                <div className="bg-violet-500/10 border border-violet-500/20 rounded-lg p-4 mb-6">
+                                    <div className="flex items-start gap-3">
+                                        <Shield className="text-violet-400 mt-0.5 flex-shrink-0" size={20} />
+                                        <div className="text-sm text-zinc-300">
+                                            <p className="font-medium text-white mb-1">Safe & Secure</p>
+                                            <p className="text-zinc-400">
+                                                🔒 You don't need to sign or approve any transaction.
+                                                This login only verifies your wallet to securely generate receipts and manage usage.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="space-y-3">
+                                    <button
+                                        onClick={handleLogin}
+                                        className="w-full flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-6 py-4 font-semibold text-white transition-all hover:bg-violet-500 hover:shadow-lg hover:shadow-violet-600/20 active:scale-95"
+                                    >
+                                        <Lock size={20} />
+                                        Connect Wallet
+                                    </button>
+                                    <button
+                                        onClick={() => setShowLoginModal(false)}
+                                        className="w-full rounded-xl bg-white/5 border border-white/10 px-6 py-3 font-medium text-zinc-300 transition-all hover:bg-white/10"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Input Card */}
             <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}

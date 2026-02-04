@@ -4,6 +4,7 @@ import { AuthService } from '../../services/AuthService';
 import { ApiKeyService } from '../../services/ApiKeyService';
 import { AuditService } from '../../services/AuditService';
 import { EmailService } from '../../services/EmailService';
+import { EmailQueueService } from '../../services/EmailQueueService';
 import { logger } from '../../lib/logger';
 import { generateRandomToken, hashToken } from '../../lib/cryptography';
 import { z } from 'zod';
@@ -12,6 +13,7 @@ const router = Router();
 const keyService = new ApiKeyService();
 const auditService = new AuditService();
 const emailService = new EmailService();
+const emailQueueService = new EmailQueueService();
 
 // Note: verifyAdmin middleware is applied in index.ts for the /api/v1/admin base path
 
@@ -455,7 +457,30 @@ router.post('/users/:id/send-verification', async (req: Request, res: Response) 
         if (tokenError) throw tokenError;
 
         // 5. Send Email
-        await emailService.sendVerificationEmail(user.email, token, expiryMinutes);
+        // 5. Get Template & Enqueue
+        const { data: template } = await supabase
+            .from('email_templates')
+            .select('id')
+            .eq('name', 'admin-verification')
+            .single();
+
+        if (!template) {
+            // Fallback for immediate fix if template missing, or throw
+            throw new Error('Verification email template not configured (admin-verification)');
+        }
+
+        const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify/${token}`;
+
+        await emailQueueService.enqueueJob({
+            recipientEmail: user.email,
+            category: 'transactional',
+            templateId: template.id,
+            priority: 'high',
+            metadata: {
+                verifyUrl,
+                expiryMinutes: expiryMinutes.toString()
+            }
+        });
 
         // 6. Audit Log
         await auditService.log({
@@ -478,10 +503,7 @@ router.post('/users/:id/send-verification', async (req: Request, res: Response) 
 });
 
 
-export default router;
 
-import { EmailQueueService } from '../../services/EmailQueueService';
-const emailQueueService = new EmailQueueService();
 
 /**
  * EMAIL OPERATIONS
@@ -697,3 +719,5 @@ router.get('/email/stats', async (req: Request, res: Response) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+export default router;

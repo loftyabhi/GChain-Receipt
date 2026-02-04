@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAccount, useReadContract, useWriteContract, useBalance, useReadContracts, useSwitchChain, useChainId } from 'wagmi';
 import { AdminLogin } from '../../components/AdminLogin';
 import { Navbar } from '@/components/Navbar';
+import EmailOpsPage from './email/page';
 import axios from 'axios';
 import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight, Mail } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -38,7 +39,7 @@ export default function DashboardPage() {
     const [isLoadingAuth, setIsLoadingAuth] = useState(true);
     const [csrfToken, setCsrfToken] = useState('');
     const [hasHydrated, setHasHydrated] = useState(false);
-    const [activeTab, setActiveTab] = useState<'ads' | 'vault' | 'contributions' | 'api' | 'users'>('ads');
+    const [activeTab, setActiveTab] = useState<'ads' | 'vault' | 'contributions' | 'api' | 'users' | 'email'>('ads');
     const [apiTab, setApiTab] = useState<'keys' | 'analytics' | 'sla' | 'audit'>('keys');
 
     // Data States
@@ -521,6 +522,9 @@ export default function DashboardPage() {
                             <button onClick={() => setActiveTab('users')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
                                 <Settings size={16} /> Users
                             </button>
+                            <button onClick={() => setActiveTab('email')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'email' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
+                                <Mail size={16} /> Mail Center
+                            </button>
                         </>
                     )}
                     <button onClick={() => setActiveTab('api')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'api' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
@@ -707,6 +711,13 @@ export default function DashboardPage() {
                             </>
                         )}
                     </>
+                )}
+
+                {/* --- EMAIL TAB --- */}
+                {activeTab === 'email' && (
+                    <div className="bg-white/5 border border-white/10 rounded-3xl p-2 backdrop-blur-sm">
+                        <EmailOpsPage />
+                    </div>
                 )}
 
                 {/* --- CONTRIBUTIONS TAB --- */}
