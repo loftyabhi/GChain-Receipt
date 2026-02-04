@@ -2,8 +2,8 @@
 -- TXPROOF CANONICAL MASTER SCHEMA
 -- ============================================================================
 -- DESCRIPTION: Single source of truth for TxProof SaaS & Registry Platform.
--- VERSION: 2.1 (Consolidated)
--- DATE: 2026-02-03
+-- VERSION: 2.2 (Consolidated)
+-- DATE: 2026-02-04
 -- 
 -- PURPOSE: 
 -- 1. Bootstrap new environments (Staging/Production/Local)
@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     email TEXT,
     is_email_verified BOOLEAN DEFAULT FALSE,
+    primary_api_key_id UUID REFERENCES api_keys(id),
     social_config JSONB DEFAULT '{}'::jsonb,
     bills_generated INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -184,6 +185,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_primary_api_key ON users(primary_api_key_id);
 
 -- 4.2 EMAIL VERIFICATION TOKENS
 CREATE TABLE IF NOT EXISTS email_verification_tokens (
@@ -360,6 +362,7 @@ CREATE TABLE IF NOT EXISTS api_usage (
     response_size_bytes INT,
     user_agent TEXT,
     ip_address INET,
+    metadata JSONB DEFAULT '{}'::jsonb,
     error_message TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -602,6 +605,145 @@ AVG(duration_ms) as avg_latency,
 COUNT(*) FILTER (WHERE status = 'failed') AS failure_count,
 COUNT(*) AS total_count
 FROM bill_jobs WHERE finished_at > NOW() - INTERVAL '24 hours' GROUP BY 1;
+
+-- ============================================================================
+-- 10. EMAIL OPERATIONS & MARKETING
+-- ============================================================================
+
+-- 10.1 USER PREFERENCES (Extension)
+ALTER TABLE users 
+ADD COLUMN IF NOT EXISTS allow_promotional_emails BOOLEAN DEFAULT FALSE;
+
+-- 10.2 EMAIL TEMPLATES (Admin Managed)
+CREATE TABLE IF NOT EXISTS email_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    subject TEXT NOT NULL,
+    html_content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('transactional', 'promotional')),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10.3 EMAIL JOBS (Priority Queue with Analytics)
+CREATE TABLE IF NOT EXISTS email_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id),
+    recipient_email TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('transactional', 'promotional')),
+    template_id UUID REFERENCES email_templates(id),
+    
+    status TEXT NOT NULL DEFAULT 'pending' 
+        CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'permanent_fail')),
+    
+    priority TEXT DEFAULT 'normal' CHECK (priority IN ('high', 'normal', 'low')),
+    
+    metadata JSONB DEFAULT '{}',
+    error TEXT,
+    
+    -- Scheduling & Stats
+    scheduled_at TIMESTAMPTZ DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    sent_at TIMESTAMPTZ,
+    attempt_count INT DEFAULT 0,
+    
+    -- Analytics
+    opened_at TIMESTAMPTZ,
+    clicked_at TIMESTAMPTZ,
+    
+    -- Snapshot (Audit)
+    rendered_html TEXT,
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for Queue Performance & Analytics
+CREATE INDEX IF NOT EXISTS idx_email_jobs_status ON email_jobs(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_email_jobs_user ON email_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_jobs_priority ON email_jobs(priority, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_email_jobs_analytics ON email_jobs(opened_at, clicked_at);
+
+-- 10.4 RLS POLICIES
+
+-- Templates
+ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins manage templates" ON email_templates;
+CREATE POLICY "Admins manage templates" ON email_templates
+    FOR ALL
+    USING (auth.role() = 'service_role' OR current_user = 'postgres');
+
+DROP POLICY IF EXISTS "Public read templates" ON email_templates;
+CREATE POLICY "Public read templates" ON email_templates
+    FOR SELECT
+    USING (true);
+
+-- Jobs
+ALTER TABLE email_jobs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service manages email jobs" ON email_jobs;
+CREATE POLICY "Service manages email jobs" ON email_jobs
+    FOR ALL
+    USING (auth.role() = 'service_role' OR current_user = 'postgres');
+
+DROP POLICY IF EXISTS "Users view own email history" ON email_jobs;
+CREATE POLICY "Users view own email history" ON email_jobs
+    FOR SELECT
+    USING (user_id = auth.uid());
+
+-- 10.5 ATOMIC JOB CLAIM FUNCTION (Priority Aware)
+CREATE OR REPLACE FUNCTION claim_next_email_job()
+RETURNS TABLE (id UUID, recipient_email TEXT, category TEXT, template_id UUID, metadata JSONB, rendered_html TEXT) 
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+    v_job_id UUID;
+BEGIN
+    SELECT email_jobs.id INTO v_job_id
+    FROM email_jobs
+    WHERE status = 'pending'
+      AND scheduled_at <= NOW()
+    ORDER BY 
+        CASE 
+            WHEN priority = 'high' THEN 1 
+            WHEN priority = 'normal' THEN 2 
+            WHEN priority = 'low' THEN 3 
+            ELSE 2 
+        END ASC,
+        scheduled_at ASC, 
+        created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED;
+
+    IF v_job_id IS NOT NULL THEN
+        UPDATE email_jobs
+        SET status = 'processing',
+            started_at = NOW(),
+            attempt_count = attempt_count + 1,
+            updated_at = NOW()
+        WHERE email_jobs.id = v_job_id;
+        
+        RETURN QUERY 
+            SELECT email_jobs.id, email_jobs.recipient_email, email_jobs.category, 
+                   email_jobs.template_id, email_jobs.metadata, email_jobs.rendered_html
+            FROM email_jobs 
+            WHERE email_jobs.id = v_job_id;
+    END IF;
+END;
+$$;
+
+-- 10.6 TRIGGERS
+DROP TRIGGER IF EXISTS email_templates_updated_at ON email_templates;
+CREATE TRIGGER email_templates_updated_at BEFORE UPDATE ON email_templates FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+DROP TRIGGER IF EXISTS email_jobs_updated_at ON email_jobs;
+CREATE TRIGGER email_jobs_updated_at BEFORE UPDATE ON email_jobs FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+-- 10.7 GRANTS
+GRANT ALL ON TABLE public.email_templates TO service_role;
+GRANT ALL ON TABLE public.email_jobs TO service_role;
+GRANT ALL ON TABLE public.users TO service_role;
 
 -- ============================================================================
 -- SCHEMA COMPLETE

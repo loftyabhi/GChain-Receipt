@@ -13,6 +13,7 @@ export class AnalyticsService {
         duration: number;
         ip: string;
         userAgent?: string;
+        metadata?: Record<string, any>;
     }) {
         // In high-volume systems, this would buffer to Redis or use a log drain.
         // Direct DB insert for < 100 RPS is fine with Postgres.
@@ -23,7 +24,8 @@ export class AnalyticsService {
                 status_code: data.status,
                 duration_ms: data.duration,
                 ip_address: data.ip,
-                user_agent: data.userAgent
+                user_agent: data.userAgent,
+                metadata: data.metadata || {}
             });
         } catch (e) {
             console.error('[Analytics] Failed to track request:', e);

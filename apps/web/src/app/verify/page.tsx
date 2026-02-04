@@ -13,18 +13,37 @@ function VerifyPageContent() {
     const [message, setMessage] = useState('Verifying your email address...');
 
     useEffect(() => {
-        const verified = searchParams.get('verified');
-        const error = searchParams.get('error');
-
-        if (verified === 'true') {
-            setStatus('success');
-            setMessage('Your email has been successfully verified! You can now access all developer features.');
-        } else if (error) {
+        const token = searchParams.get('token');
+        if (!token) {
             setStatus('error');
-            setMessage(error);
-        } else {
-            setStatus('loading');
+            setMessage('Invalid verification link: No token provided.');
+            return;
         }
+
+        const verifyEmail = async () => {
+            try {
+                // Call Backend API
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.txproof.xyz';
+                const res = await fetch(`${apiUrl}/api/v1/user/verify/${token}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Verification failed');
+                }
+
+                setStatus('success');
+                setMessage(data.message || 'Your email has been successfully verified!');
+            } catch (err: any) {
+                setStatus('error');
+                setMessage(err.message || 'An error occurred during verification.');
+            }
+        };
+
+        verifyEmail();
     }, [searchParams]);
 
     return (
@@ -49,10 +68,10 @@ function VerifyPageContent() {
                     <h1 className="text-2xl font-bold mb-3 text-white">Verified!</h1>
                     <p className="text-gray-400 mb-8">{message}</p>
                     <button
-                        onClick={() => router.push('/developers')}
+                        onClick={() => router.push('/dashboard')}
                         className="w-full bg-white text-black hover:bg-zinc-200 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all"
                     >
-                        Go to Console <ArrowRight size={18} />
+                        Go to Dashboard <ArrowRight size={18} />
                     </button>
                 </div>
             )}

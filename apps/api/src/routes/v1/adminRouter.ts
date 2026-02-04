@@ -3,11 +3,15 @@ import { supabase } from '../../lib/supabase';
 import { AuthService } from '../../services/AuthService';
 import { ApiKeyService } from '../../services/ApiKeyService';
 import { AuditService } from '../../services/AuditService';
+import { EmailService } from '../../services/EmailService';
+import { logger } from '../../lib/logger';
+import { generateRandomToken, hashToken } from '../../lib/cryptography';
 import { z } from 'zod';
 
 const router = Router();
 const keyService = new ApiKeyService();
 const auditService = new AuditService();
+const emailService = new EmailService();
 
 // Note: verifyAdmin middleware is applied in index.ts for the /api/v1/admin base path
 
@@ -404,4 +408,292 @@ router.post('/users/:id/verify', async (req: Request, res: Response) => {
 });
 
 
+/**
+ * POST /api/v1/admin/users/:id/send-verification
+ * Admin: Trigger verification email with custom expiry
+ */
+router.post('/users/:id/send-verification', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { expiryMinutes } = z.object({
+            expiryMinutes: z.number().int().min(1).max(43200).optional().default(15) // Default 15m, Max 30 days
+        }).parse(req.body);
+
+        const actorId = (req as any).user?.address || 'admin';
+
+        // 1. Fetch User
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('email, is_email_verified')
+            .eq('id', id)
+            .single();
+
+        if (userError || !user) throw new Error('User not found');
+        if (!user.email) return res.status(400).json({ error: 'User has no email address' });
+
+        // 2. Invalidate Check: Delete existing tokens
+        await supabase
+            .from('email_verification_tokens')
+            .delete()
+            .eq('user_id', id);
+
+        // 3. Generate New Token
+        const token = generateRandomToken(32);
+        const tokenHash = hashToken(token);
+        const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+        // 4. Store Token
+        const { error: tokenError } = await supabase
+            .from('email_verification_tokens')
+            .insert({
+                user_id: id,
+                token_hash: tokenHash,
+                expires_at: expiresAt.toISOString(),
+                last_requested_at: new Date().toISOString()
+            });
+
+        if (tokenError) throw tokenError;
+
+        // 5. Send Email
+        await emailService.sendVerificationEmail(user.email, token, expiryMinutes);
+
+        // 6. Audit Log
+        await auditService.log({
+            actorId,
+            action: 'ADMIN_VERIFICATION_EMAIL_SENT',
+            targetId: id,
+            metadata: {
+                email: user.email,
+                expiryMinutes,
+                expiresAt: expiresAt.toISOString()
+            },
+            ip: req.ip
+        });
+
+        res.json({ success: true, message: `Verification email sent (Expires in ${expiryMinutes}m)` });
+    } catch (e: any) {
+        logger.error('Admin Verify Error', { error: e.message });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+
 export default router;
+
+import { EmailQueueService } from '../../services/EmailQueueService';
+const emailQueueService = new EmailQueueService();
+
+/**
+ * EMAIL OPERATIONS
+ * ============================================================================
+ */
+
+/**
+ * GET /api/v1/admin/email/templates
+ * List all templates
+ */
+router.get('/email/templates', async (req: Request, res: Response) => {
+    try {
+        const { data, error } = await supabase
+            .from('email_templates')
+            .select('*')
+            .order('name', { ascending: true });
+
+        if (error) throw error;
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/email/templates
+ * Create a new template
+ */
+router.post('/email/templates', async (req: Request, res: Response) => {
+    try {
+        const { name, subject, htmlContent, category } = req.body;
+
+        // Basic validation
+        if (!name || !subject || !htmlContent || !category) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const { data, error } = await supabase
+            .from('email_templates')
+            .insert({
+                name,
+                subject,
+                html_content: htmlContent,
+                category
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await auditService.log({
+            actorId: (req as any).user?.address || 'admin',
+            action: 'EMAIL_TEMPLATE_CREATED',
+            targetId: data.id,
+            metadata: { name, category },
+            ip: req.ip
+        });
+
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * PUT /api/v1/admin/email/templates/:id
+ * Update template
+ */
+router.put('/email/templates/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { name, subject, htmlContent, category, isActive } = req.body;
+
+        const updates: any = { updated_at: new Date().toISOString() };
+        if (name) updates.name = name;
+        if (subject) updates.subject = subject;
+        if (htmlContent) updates.html_content = htmlContent;
+        if (category) updates.category = category;
+        if (typeof isActive === 'boolean') updates.is_active = isActive;
+
+        const { data, error } = await supabase
+            .from('email_templates')
+            .update(updates)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await auditService.log({
+            actorId: (req as any).user?.address || 'admin',
+            action: 'EMAIL_TEMPLATE_UPDATED',
+            targetId: id,
+            metadata: { name: data.name },
+            ip: req.ip
+        });
+
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * POST /api/v1/admin/email/send
+ * Launch an email campaign or send single email
+ */
+router.post('/email/send', async (req: Request, res: Response) => {
+    try {
+        const { category, templateId, audience, segmentConfig } = req.body;
+
+        // Validation
+        if (!category || !templateId || !audience) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const actorId = (req as any).user?.address || 'admin';
+
+        // 1. Resolve Recipients
+        let recipients: { id: string, email: string }[] = [];
+
+        if (audience === 'single') {
+            if (!segmentConfig?.email) return res.status(400).json({ error: 'Missing target email for single send' });
+            // Potentially lookup user ID if exists, or send generic
+            const { data: user } = await supabase.from('users').select('id, email').eq('email', segmentConfig.email).single();
+            if (user) {
+                recipients.push(user);
+            } else {
+                // For now, only allowing existing users to be safe with verified check
+                return res.status(400).json({ error: 'Recipient must be a registered user.' });
+            }
+        } else if (audience === 'verified_users') {
+            const { data } = await supabase
+                .from('users')
+                .select('id, email')
+                .eq('is_email_verified', true);
+            if (data) recipients = data;
+        } else if (audience === 'all_users') {
+            // BE CAREFUL: "all_users" logic should probably still filter by verified for certain things?
+            // The prompt said "only verified emails used" for security requirements.
+            // So "all_users" effectively means "all verified users" if we strictly enforce verification in queue.
+            // Let's filter here too to save queue worker from erroring.
+            const { data } = await supabase
+                .from('users')
+                .select('id, email')
+                .eq('is_email_verified', true);
+            if (data) recipients = data;
+        }
+
+        if (recipients.length === 0) {
+            return res.json({ success: true, message: 'No valid recipients found for criteria.', jobsCreated: 0 });
+        }
+
+        // 2. Enqueue Jobs
+        let jobsCreated = 0;
+        for (const recipient of recipients) {
+            try {
+                await emailQueueService.enqueueJob({
+                    userId: recipient.id,
+                    recipientEmail: recipient.email,
+                    category,
+                    templateId,
+                    metadata: { source: 'admin_campaign', actorId }
+                });
+                jobsCreated++;
+            } catch (err) {
+                // Log but continue (e.g. unverified user skipped if enqueue checks again)
+                logger.warn(`Skipped recipient ${recipient.email}: ${(err as Error).message}`);
+            }
+        }
+
+        // 3. Audit Log
+        await auditService.log({
+            actorId,
+            action: 'EMAIL_CAMPAIGN_LAUNCHED',
+            targetId: templateId,
+            metadata: { category, audience, jobsCreated },
+            ip: req.ip
+        });
+
+        res.json({ success: true, message: `Campaign queued for ${jobsCreated} recipients.`, jobsCreated });
+
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * GET /api/v1/admin/email/stats
+ * Dashboard stats
+ */
+router.get('/email/stats', async (req: Request, res: Response) => {
+    try {
+        const { count: queued } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+        const { count: sent } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).eq('status', 'sent');
+        const { count: failed } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).in('status', ['failed', 'permanent_fail']);
+
+        // Recent failures
+        const { data: recentFailures } = await supabase
+            .from('email_jobs')
+            .select('id, recipient_email, error, attempt_count, created_at')
+            .in('status', ['failed', 'permanent_fail'])
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        res.json({
+            queued,
+            sent,
+            failed,
+            recentFailures
+        });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});

@@ -409,10 +409,11 @@ router.post('/verify/request', verifyUser, strictRateLimiter, async (req: Reques
 });
 
 /**
- * GET /verify/:token
+ * POST /verify/:token
  * Public: Process verification link (Hashing lookup)
+ * Idempotent: Returns success if already verified.
  */
-router.get('/verify/:token', async (req: Request, res: Response) => {
+router.post('/verify/:token', async (req: Request, res: Response) => {
     try {
         const { token } = req.params;
         const incomingHash = hashToken(token);
@@ -426,15 +427,28 @@ router.get('/verify/:token', async (req: Request, res: Response) => {
             .single();
 
         if (tokenError || !tokenData) {
-            return res.status(400).redirect(`${process.env.NEXT_PUBLIC_APP_URL}/verify?error=Invalid or expired verification link`);
+            return res.status(400).json({ error: 'Invalid or expired verification link' });
         }
 
         // 2. Check Expiry (15m enforced)
         if (new Date(tokenData.expires_at) < new Date()) {
-            return res.status(400).redirect(`${process.env.NEXT_PUBLIC_APP_URL}/verify?error=Verification link has expired`);
+            return res.status(400).json({ error: 'Verification link has expired' });
         }
 
         // 3. Update User & Delete Token (Single-use)
+        // Idempotency check: fetch user first
+        const { data: user } = await supabase
+            .from('users')
+            .select('is_email_verified')
+            .eq('id', tokenData.user_id)
+            .single();
+
+        if (user?.is_email_verified) {
+            // Clean up token anyway
+            await supabase.from('email_verification_tokens').delete().eq('token_hash', incomingHash);
+            return res.json({ success: true, message: 'Email already verified' });
+        }
+
         const { error: userUpdateError } = await supabase
             .from('users')
             .update({ is_email_verified: true })
@@ -455,9 +469,7 @@ router.get('/verify/:token', async (req: Request, res: Response) => {
             ip: userIp
         });
 
-        // Redirect to a success page
-        const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/verify?verified=true`;
-        res.redirect(redirectUrl);
+        res.json({ success: true, message: 'Email successfully verified' });
 
     } catch (e: any) {
         logger.error('Email verification process failed', { error: e.message });

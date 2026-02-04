@@ -5,7 +5,7 @@ import { useAccount, useReadContract, useWriteContract, useBalance, useReadContr
 import { AdminLogin } from '../../components/AdminLogin';
 import { Navbar } from '@/components/Navbar';
 import axios from 'axios';
-import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight } from 'lucide-react';
+import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight, Mail } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { formatEther, parseEther, erc20Abi, formatUnits } from 'viem';
@@ -59,6 +59,11 @@ export default function DashboardPage() {
     const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
     const [keyFormData, setKeyFormData] = useState({ ownerId: '', planName: 'Free' });
     const [createdKey, setCreatedKey] = useState<string | null>(null); // Show once
+
+    // Verification Modal State
+    const [verifModalOpen, setVerifModalOpen] = useState(false);
+    const [verifTargetUser, setVerifTargetUser] = useState<any>(null);
+    const [verifExpiry, setVerifExpiry] = useState<number>(15); // Minutes
 
     // Vault Form States
     const [withdrawAddress, setWithdrawAddress] = useState('');
@@ -272,6 +277,29 @@ export default function DashboardPage() {
             toast.success("Record invalidated", { id: toastId });
             setInvModalOpen(false);
             fetchContributions();
+        } catch (err) {
+            handleError(err);
+            toast.dismiss(toastId);
+        }
+    };
+
+    const handleOpenVerification = (user: any) => {
+        setVerifTargetUser(user);
+        setVerifExpiry(15); // Reset to default
+        setVerifModalOpen(true);
+    };
+
+    const handleSendVerification = async () => {
+        if (!verifTargetUser) return;
+        const toastId = toast.loading("Sending email...");
+        try {
+            await axios.post(`/api/v1/admin/users/${verifTargetUser.id}/send-verification`, {
+                expiryMinutes: Number(verifExpiry)
+            }, { headers: { 'X-CSRF-Token': csrfToken } });
+
+            toast.success("Verification email sent!", { id: toastId });
+            setVerifModalOpen(false);
+            fetchUsers(); // Refresh status
         } catch (err) {
             handleError(err);
             toast.dismiss(toastId);
@@ -541,6 +569,40 @@ export default function DashboardPage() {
                             )}
                         </div>
 
+
+                        <AnimatePresence>
+                            {verifModalOpen && (
+                                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+                                    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-2xl relative">
+                                        <button onClick={() => setVerifModalOpen(false)} className="absolute top-6 right-6 p-2 text-zinc-500 hover:text-white"><X size={20} /></button>
+                                        <h2 className="text-2xl font-bold text-white mb-2">Verify Email</h2>
+                                        <p className="text-zinc-400 text-sm mb-6">Send a verification link to <span className="text-white font-mono">{verifTargetUser?.email}</span>.</p>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Expiry Time</label>
+                                                <select
+                                                    value={verifExpiry}
+                                                    onChange={(e) => setVerifExpiry(Number(e.target.value))}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-white focus:border-violet-500 outline-none [&>option]:bg-zinc-900"
+                                                >
+                                                    <option value={15}>15 Minutes</option>
+                                                    <option value={60}>1 Hour</option>
+                                                    <option value={1440}>24 Hours</option>
+                                                    <option value={10080}>7 Days</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="pt-2">
+                                                <button onClick={handleSendVerification} className="w-full bg-violet-600 hover:bg-violet-500 text-white rounded-xl py-3 font-bold shadow-lg shadow-violet-500/20 transition-all">
+                                                    Send Verification Link
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                </div>
+                            )}
+                        </AnimatePresence>
                         <AnimatePresence>
                             {isFormOpen && (
                                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
@@ -811,6 +873,13 @@ export default function DashboardPage() {
                                                 {new Date(u.created_at).toLocaleDateString()}
                                             </td>
                                             <td className="p-5 text-right">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleOpenVerification(u); }}
+                                                    className="p-2 text-zinc-500 hover:text-white bg-white/5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-all mr-2"
+                                                    title="Send Verification Email"
+                                                >
+                                                    <Mail size={16} />
+                                                </button>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'user', data: u }); }}
                                                     className="p-2 text-zinc-500 hover:text-white bg-white/5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-all"

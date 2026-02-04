@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../lib/logger';
+import { supabase } from '../lib/supabase';
 
 export interface IEmailOptions {
     from: string;
@@ -36,22 +37,35 @@ export class NodemailerProvider implements IEmailProvider {
 export class EmailService {
     constructor(private provider: IEmailProvider = new NodemailerProvider()) { }
 
-    private renderTemplate(templateName: string, data: Record<string, string>): { html: string; text: string } {
+    private getBaseTemplate(): { html: string; text: string } {
         const templatesDir = path.join(__dirname, 'email/templates');
+        try {
+            return {
+                html: fs.readFileSync(path.join(templatesDir, 'base.html'), 'utf-8'),
+                text: '{{content}}' // Simple fallback
+            };
+        } catch (e) {
+            // Fallback if file system fails (e.g. serverless environment issue)
+            logger.warn('Could not load base.html', e);
+            return {
+                html: '<html><body>{{content}}</body></html>',
+                text: '{{content}}'
+            };
+        }
+    }
 
-        // Base paths
-        const baseHtmlPath = path.join(templatesDir, 'base.html');
-        const contentHtmlPath = path.join(templatesDir, `${templateName}.html`);
-        const contentTextPath = path.join(templatesDir, `${templateName}.txt`);
-
-        // Load files
-        const baseHtml = fs.readFileSync(baseHtmlPath, 'utf-8');
-        const contentHtmlSource = fs.readFileSync(contentHtmlPath, 'utf-8');
-        const contentTextSource = fs.readFileSync(contentTextPath, 'utf-8');
+    /**
+     * Renders a template by injecting content into the base theme and replacing variables.
+     * @param contentHtml The specific email body content (HTML)
+     * @param contentText The specific email body content (Text)
+     * @param data Variables to replace (e.g. {{name}})
+     */
+    public render(contentHtml: string, contentText: string, data: Record<string, string>): { html: string; text: string } {
+        const base = this.getBaseTemplate();
 
         // Inject content into base
-        let html = baseHtml.replace('{{content}}', contentHtmlSource);
-        let text = contentTextSource;
+        let html = base.html.replace('{{content}}', contentHtml);
+        let text = contentText; // Text version usually doesn't have a wrapper, or we can prepend header/footer
 
         // Populate variables
         const allData = {
@@ -61,37 +75,91 @@ export class EmailService {
 
         for (const [key, value] of Object.entries(allData)) {
             const regex = new RegExp(`{{${key}}}`, 'g');
-            html = html.replace(regex, value);
-            text = text.replace(regex, value);
+            html = html.replace(regex, value || '');
+            text = text.replace(regex, value || '');
         }
 
         return { html, text };
     }
 
-    async sendVerificationEmail(email: string, token: string) {
-        const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify?token=${token}`;
-        const expiryMinutes = 15;
+    /**
+     * Legacy helper to load from file system
+     */
+    private renderFileTemplate(templateName: string, data: Record<string, string>): { html: string; text: string } {
+        const templatesDir = path.join(__dirname, 'email/templates');
+        const contentHtmlPath = path.join(templatesDir, `${templateName}.html`);
+        const contentTextPath = path.join(templatesDir, `${templateName}.txt`);
 
-        const { html, text } = this.renderTemplate('verification', {
+        let contentHtml = '';
+        let contentText = '';
+
+        try {
+            contentHtml = fs.readFileSync(contentHtmlPath, 'utf-8');
+            contentText = fs.readFileSync(contentTextPath, 'utf-8');
+        } catch (e) {
+            logger.error(`Template file not found: ${templateName}`, e);
+            throw new Error(`Template ${templateName} not found`);
+        }
+
+        return this.render(contentHtml, contentText, data);
+    }
+
+    async sendVerificationEmail(email: string, token: string, expiryMinutes: number = 15) {
+        const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://txproof.xyz'}/verify/${token}`;
+
+        const { html, text } = this.renderFileTemplate('verification', {
             subject: 'Verify Your Email - TxProof Developers',
             verifyUrl: verificationUrl,
             expiryMinutes: expiryMinutes.toString()
         });
 
+        await this.sendRaw(email, 'Verify Your Email - TxProof Developers', html, text);
+    }
+
+    async sendRaw(to: string, subject: string, html: string, text?: string) {
         const mailOptions: IEmailOptions = {
             from: `"TxProof Support" <${process.env.GMAIL_USER}>`,
-            to: email,
-            subject: 'Verify Your Email - TxProof Developers',
+            to,
+            subject,
             html,
             text
         };
 
         try {
             await this.provider.send(mailOptions);
-            logger.info('Verification email sent', { email });
+            logger.info('Email sent successfully', { to, subject });
         } catch (error: any) {
-            logger.error('Failed to send verification email', { email, error: error.message });
-            throw new Error('Could not send verification email. Please try again later.');
+            logger.error('Failed to send email', { to, subject, error: error.message });
+            throw error;
         }
+    }
+
+    /**
+     * Injects tracking pixel and wraps links for analytics
+     */
+    public injectTracking(html: string, jobId: string): string {
+        const appUrl = process.env.API_URL || 'https://backend.txproof.xyz'; // Or your API base
+        const openPixel = `<img src="${appUrl}/api/v1/email/track/open/${jobId}" width="1" height="1" style="display:none;" />`;
+
+        // 1. Append Open Pixel
+        let newHtml = html;
+        if (newHtml.includes('</body>')) {
+            newHtml = newHtml.replace('</body>', `${openPixel}</body>`);
+        } else {
+            newHtml += openPixel;
+        }
+
+        // 2. Wrap Links (Simple Regex for href="http...")
+        // Note: Using DOM parser is safer but regex is faster/easier for simple cases without JSDOM
+        newHtml = newHtml.replace(/href="(http[^"]+)"/g, (match, url) => {
+            // Skip already wrapped or internal tracking links if any (sanity check)
+            if (url.includes('/email/track')) return match;
+
+            const encodedUrl = encodeURIComponent(url);
+            const trackingUrl = `${appUrl}/api/v1/email/track/click/${jobId}?url=${encodedUrl}`;
+            return `href="${trackingUrl}"`;
+        });
+
+        return newHtml;
     }
 }

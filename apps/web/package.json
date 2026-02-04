@@ -6,8 +6,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "verify:seo": "node scripts/verify-seo.mjs"
+    "lint": "eslint"
   },
   "dependencies": {
     "@metamask/sdk": "^0.34.0",

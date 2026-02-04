@@ -114,6 +114,48 @@ export class ApiKeyService {
     }
 
     /**
+     * Find an active key for a user (for Dashboard/JWT usage).
+     */
+    async getActiveKeyForUser(userId: string): Promise<ApiKeyDetails | null> {
+        const { data, error } = await supabase
+            .from('api_keys')
+            .select(`
+                id,
+                owner_id,
+                environment,
+                permissions,
+                is_active,
+                ip_allowlist,
+                abuse_flag,
+                plan:plans (
+                    id, 
+                    name, 
+                    rate_limit_rps, 
+                    monthly_quota,
+                    max_burst,
+                    priority_level
+                )
+            `)
+            .eq('owner_user_id', userId)
+            .eq('is_active', true)
+            .limit(1)
+            .single();
+
+        if (error || !data) return null;
+
+        if (data.abuse_flag) return null;
+
+        return {
+            id: data.id,
+            owner_id: data.owner_id,
+            environment: data.environment,
+            permissions: data.permissions,
+            ipAllowlist: data.ip_allowlist,
+            plan: data.plan as any
+        };
+    }
+
+    /**
      * Check if key has quota remaining and increment usage.
      * Returns detailed object for header injection.
      */

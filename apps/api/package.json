@@ -5,10 +5,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc && npm run postbuild",
     "postbuild": "node scripts/postbuild.js",
-    "start": "node dist/index.js",
-    "test:verification": "tsx src/scripts/test-receipt-verification.ts",
-    "migrate:hashes": "tsx src/scripts/migrate-receipt-hashes.ts --apply",
-    "migrate:hashes:dry-run": "tsx src/scripts/migrate-receipt-hashes.ts"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.4",

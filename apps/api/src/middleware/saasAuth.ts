@@ -39,25 +39,67 @@ export const saasMiddleware = async (req: Request, res: Response, next: NextFunc
     const authHeader = req.headers['authorization'];
     const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
-    // 1. Authentication
-    if (!apiKey || !apiKey.startsWith('sk_')) {
-        return res.status(401).json({ code: 'MISSING_API_KEY', error: 'Missing or invalid API Key' });
-    }
+    // 4. Auth & API Key Key Context Resolution
+    let details: ApiKeyDetails | null = null;
+    let authMethod = 'apikey';
 
     try {
-        const details = await apiKeyService.verifyKey(apiKey);
+        // Priority 1: User Auth (Bearer JWT)
+        if (authHeader?.startsWith('Bearer ') && !authHeader.startsWith('Bearer sk_')) {
+            authMethod = 'jwt';
+            const token = authHeader.split(' ')[1];
+            try {
+                // Lazy load AuthService
+                const { AuthService } = require('../services/AuthService');
+                const authService = new AuthService();
+                const payload = authService.verifyToken(token);
 
-        // 1.1 Hard Abuse/Invalid Check
-        if (!details) {
-            console.warn(`[Security] Invalid key attempt from ${req.ip}`);
-            return res.status(403).json({ code: 'INVALID_API_KEY', error: 'Invalid, inactive, or flagged API Key' });
+                if (payload && payload.id) {
+                    // Resolve Primary Key
+                    // Usage: user.primary_api_key_id (Future Optimization)
+                    // Current: getActiveKeyForUser acts as the resolver.
+                    details = await apiKeyService.getActiveKeyForUser(payload.id);
+
+                    if (!details) {
+                        // Strict Guard: No valid API Key context found for this user.
+                        // We do NOT auto-create keys here to avoid side effects (mutating billing state) in middleware.
+                        return res.status(400).json({
+                            code: 'NO_LINKED_API_KEY',
+                            error: 'No active API Key linked to your account. Please create one in the Dashboard.'
+                        });
+                    }
+                }
+            } catch (e) {
+                // Std: If Bearer provided but invalid -> 401
+                return res.status(401).json({ code: 'INVALID_TOKEN', error: 'Invalid Authentication Token' });
+            }
         }
 
-        // 1.2 IP Whitelist Enformcement
+        // Priority 2: Machine Auth (X-API-Key)
+        else if (req.headers['x-api-key']) {
+            authMethod = 'apikey';
+            const key = Array.isArray(req.headers['x-api-key']) ? req.headers['x-api-key'][0] : req.headers['x-api-key'];
+            if (key) details = await apiKeyService.verifyKey(key);
+        }
+
+        // Priority 3: Legacy Machine Auth (Bearer sk_)
+        else if (apiKey && apiKey.startsWith('sk_')) {
+            authMethod = 'legacy';
+            details = await apiKeyService.verifyKey(apiKey);
+        }
+
+        // 1. Authentication Check
+        if (!details) {
+            if (authMethod === 'jwt') {
+                return res.status(403).json({ code: 'NO_ACTIVE_API_KEY', error: 'Dashboard users must have an active API Key to use this feature. Please create one in Settings.' });
+            }
+            return res.status(401).json({ code: 'MISSING_API_KEY', error: 'Missing or invalid API Key' });
+        }
+
+        // 1.1 Hard Abuse/Invalid Check - (Already checked in Service, but double safety)
         if (details.ipAllowlist && details.ipAllowlist.length > 0) {
             const clientIp = req.ip || '0.0.0.0';
             if (!details.ipAllowlist.includes(clientIp)) {
-                console.warn(`[Security] Key ${details.id} blocked: IP ${clientIp} not allowed`);
                 return res.status(403).json({ code: 'IP_NOT_ALLOWED', error: 'IP Address not allowed' });
             }
         }
@@ -89,6 +131,8 @@ export const saasMiddleware = async (req: Request, res: Response, next: NextFunc
         // Response Hook for Logging (Latency & Status)
         const start = Date.now();
         res.on('finish', () => {
+            if (!details) return;
+
             const duration = Date.now() - start;
             // Fire & Forget Logging
             analyticsService.trackRequest({
@@ -98,7 +142,8 @@ export const saasMiddleware = async (req: Request, res: Response, next: NextFunc
                 status: res.statusCode,
                 duration,
                 ip: req.ip || 'unknown',
-                userAgent: req.get('user-agent')
+                userAgent: req.get('user-agent'),
+                metadata: { auth_mode: authMethod }
             }).catch(console.error);
         });
 

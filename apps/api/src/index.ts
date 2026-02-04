@@ -10,6 +10,7 @@ import { BillService } from './services/BillService';
 import { SoftQueueService } from './services/SoftQueueService';
 import { WebhookService } from './services/WebhookService';
 import { ContributionService } from './services/ContributionService';
+import { EmailQueueService } from './services/EmailQueueService';
 import { logger, createComponentLogger } from './lib/logger';
 import { supabase } from './lib/supabase';
 
@@ -29,6 +30,7 @@ import templatesRouter from './routes/v1/templates'; // [NEW]
 import usageRouter from './routes/v1/usage'; // [NEW]
 import verificationRouter from './routes/v1/verification'; // [NEW]
 import { userRouter } from './routes/v1/userRouter'; // [NEW]
+import trackingRouter from './routes/v1/trackingRouter'; // [NEW - Elite]
 
 dotenv.config();
 
@@ -105,7 +107,9 @@ app.use('/api/v1/webhooks', webhooksRouter); // [NEW]
 app.use('/api/v1/templates', templatesRouter); // [NEW]
 app.use('/api/v1/usage', usageRouter); // [NEW]
 app.use('/api/v1/verify', verificationRouter); // [NEW]
+app.use('/api/v1/verify', verificationRouter); // [NEW]
 app.use('/api/v1/user', userRouter); // [NEW]
+app.use('/api/v1/email', trackingRouter); // [NEW - Elite]
 // Note: Admin router mounted below after verifyAdmin definition
 
 
@@ -395,6 +399,11 @@ app.listen(port, () => {
 
     // Start webhook delivery worker
     webhookService.startDeliveryWorker();
+
+    // Start Email Queue Worker
+    const emailQueueService = new EmailQueueService();
+    emailQueueService.startWorker();
+    logger.info('Email Queue worker started');
 
     // Start Contribution Retry Worker (Every 60s)
     const contributionService = new ContributionService();
