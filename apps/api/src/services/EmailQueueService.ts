@@ -72,6 +72,7 @@ export class EmailQueueService {
             throw new Error('Failed to queue email.');
         }
 
+        // Log essential details only (Hides confusing error:null)
         console.log('✅ [EmailQueue] Insert Success:', data);
         logger.info('Enqueued email job', { jobId: data.id, recipientEmail, priority });
         return data;
@@ -151,8 +152,22 @@ export class EmailQueueService {
                 // 4.5 Inject Tracking
                 html = this.emailService.injectTracking(html, job.id);
 
-                // 5. Send
-                await this.emailService.sendRaw(job.recipient_email, template.subject, html, text);
+                // 5. Determine Sender & Send
+                // Explicit Sender Routing (Robustness Upgrade)
+                const senderMap: Record<string, string> = {
+                    verify: 'verify@mail.txproof.xyz',
+                    security: 'security@mail.txproof.xyz',
+                    support: 'support@mail.txproof.xyz',
+                    notifications: 'notifications@mail.txproof.xyz',
+                    promo: 'updates@mail.txproof.xyz'
+                };
+
+                // Default to 'support' if somehow the type is missing or invalid (database constraint prevents this mostly)
+                // The template.sender_type comes from the database now.
+                const senderType = (template as any).sender_type || 'support';
+                const sender = senderMap[senderType] || 'support@mail.txproof.xyz';
+
+                await this.emailService.sendRaw(job.recipient_email, template.subject, html, text, sender);
 
                 // 6. Success Update
                 await supabase.from('email_jobs').update({
@@ -207,7 +222,8 @@ export class EmailQueueService {
                 await supabase.from('email_jobs').update({
                     status: newStatus,
                     error: jobError.message,
-                    scheduled_at: newStatus === 'pending' ? scheduledAt.toISOString() : undefined
+                    attempt_count: attempts + 1,
+                    scheduled_at: newStatus === 'pending' ? scheduledAt.toISOString() : null
                 }).eq('id', job.id);
 
                 await this.auditService.log({

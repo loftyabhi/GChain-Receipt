@@ -153,9 +153,16 @@ export class EmailService {
         await this.sendRaw(email, 'Verify Your Email - TxProof Developers', html, text);
     }
 
-    async sendRaw(to: string, subject: string, html: string, text?: string) {
+    /**
+     * Modified sendRaw to accept optional sender override
+     */
+    async sendRaw(to: string, subject: string, html: string, text?: string, fromOverride?: string) {
+        // Default Sender
+        const from = fromOverride || 'notifications@mail.txproof.xyz';
+        const fromHeader = `TxProof <${from}>`;
+
         const mailOptions: IEmailOptions = {
-            from: `"TxProof Support" <${process.env.GMAIL_USER}>`,
+            from: fromHeader,
             to,
             subject,
             html,
