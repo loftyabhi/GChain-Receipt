@@ -869,3 +869,6 @@ GRANT ALL ON TABLE public.users TO service_role;
 -- ============================================================================
 -- SCHEMA COMPLETE
 -- ============================================================================
+UPDATE users 
+SET allow_promotional_emails = TRUE 
+WHERE allow_promotional_emails IS NULL AND account_status = 'active';
