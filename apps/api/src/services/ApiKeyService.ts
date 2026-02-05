@@ -23,6 +23,32 @@ export class ApiKeyService {
      * Returns the raw key (Display Once) and stores the hash.
      */
     async createKey(ownerId: string, planName: 'Free' | 'Pro' | 'Enterprise' = 'Free', options?: { ownerUserId?: string }) {
+        // 0. Ensure User Record Exists (Unify Identity)
+        let userId = options?.ownerUserId;
+
+        if (!userId) {
+            // Look up existing user by wallet address
+            const { data: existingUser } = await supabase
+                .from('users')
+                .select('id')
+                .eq('wallet_address', ownerId.toLowerCase())
+                .single();
+
+            if (existingUser) {
+                userId = existingUser.id;
+            } else {
+                // Auto-create user record for new wallet
+                const { data: newUser, error: userError } = await supabase
+                    .from('users')
+                    .insert({ wallet_address: ownerId.toLowerCase() })
+                    .select('id')
+                    .single();
+
+                if (userError) throw new Error(`Failed to create user: ${userError.message}`);
+                userId = newUser.id;
+            }
+        }
+
         // 1. Get Plan ID
         const { data: plan } = await supabase
             .from('plans')
@@ -32,20 +58,20 @@ export class ApiKeyService {
 
         if (!plan) throw new Error(`Plan ${planName} not found`);
 
-        // 2. Generate Key
+        // 2. Generate Key with TxProof branding
         const random = randomBytes(24).toString('hex');
-        const rawKey = `sk_live_${random}`;
-        const prefix = `sk_live_${random.substring(0, 4)}`;
+        const rawKey = `tx_p_live_${random}`;
+        const prefix = `tx_p_live_${random.substring(0, 4)}`;
         const hash = createHash('sha256').update(rawKey).digest('hex');
 
-        // 3. Store
+        // 3. Store (ALWAYS with owner_user_id)
         const { data, error } = await supabase
             .from('api_keys')
             .insert({
                 key_hash: hash,
                 prefix: prefix,
                 owner_id: ownerId,
-                owner_user_id: options?.ownerUserId || null,
+                owner_user_id: userId,  // ✅ ALWAYS SET - Ensures unified tracking
                 plan_id: plan.id,
                 plan_tier: planName,
                 quota_limit: plan.monthly_quota,
@@ -103,8 +129,8 @@ export class ApiKeyService {
 
         if (!data.is_active) return null;
 
-        // 2. Strict Account Ban Check (Owner Status)
-        // We check both owner_user_id (Linked) and owner_id (Wallet/Legacy)
+        // 2. Strict Account Ban Check
+        // All keys now have owner_user_id, so we can simplify this check
         let ownerStatus = 'active';
 
         if (data.owner_user_id) {
@@ -112,13 +138,6 @@ export class ApiKeyService {
                 .from('users')
                 .select('account_status')
                 .eq('id', data.owner_user_id)
-                .single();
-            if (userData) ownerStatus = userData.account_status;
-        } else if (data.owner_id) {
-            const { data: userData } = await supabase
-                .from('users')
-                .select('account_status')
-                .eq('wallet_address', data.owner_id.toLowerCase())
                 .single();
             if (userData) ownerStatus = userData.account_status;
         }

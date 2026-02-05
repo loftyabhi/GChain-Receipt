@@ -63,13 +63,8 @@ This document details the Enterprise SaaS API layer implemented for TxProof.
 2.  **Environment Variables**:
     Ensure `MAX_CONCURRENT_JOBS` is tuned for your server size.
 
-3.  **API Usage Example**:
-    ```bash
-    curl -X POST https://api.txproof.xyz/api/v1/pdfs \
-      -H "Authorization: Bearer sk_live_..." \
-      -H "Content-Type: application/json" \
-      -d '{ "txHash": "0x...", "chainId": 8453 }'
-    ```
+3.  **API Usage**:
+    Refer to [`API_REFERENCE.md`](./API_REFERENCE.md) for detailed actionable examples (cURL) and schema definitions.
 
 ## 4. Operational Runbook
 

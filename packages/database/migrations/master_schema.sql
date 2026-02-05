@@ -140,10 +140,10 @@ SET
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     key_hash TEXT NOT NULL UNIQUE, -- SHA-256
-    prefix TEXT NOT NULL,          -- sk_live_...
+    prefix TEXT NOT NULL,          -- tx_p_live_... (TxProof branded)
     name TEXT,
-    owner_id TEXT,                 -- Wallet Address (Legacy)
-    owner_user_id UUID,            -- Link to Users.id (Modern)
+    owner_id TEXT,                 -- Wallet Address (Legacy, kept for backward compat)
+    owner_user_id UUID,            -- Link to Users.id (Modern - ALWAYS SET)
     plan_id UUID REFERENCES plans(id),
     plan_tier TEXT DEFAULT 'Free',
     quota_limit INT DEFAULT 100,
@@ -156,11 +156,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     abuse_flag BOOLEAN DEFAULT FALSE,
     secret_salt TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
--- Late constraints set if needed via migrations, but canonical should have FKey
--- ALTER TABLE api_keys ADD CONSTRAINT fk_owner_user FOREIGN KEY (owner_user_id) REFERENCES users(id);
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_owner ON api_keys(owner_id);
@@ -198,6 +196,23 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_primary_api_key ON users(primary_api_key_id);
 CREATE INDEX IF NOT EXISTS idx_users_account_status ON users(account_status) WHERE account_status != 'active';
 CREATE UNIQUE INDEX IF NOT EXISTS unique_verified_email ON users (LOWER(email)) WHERE is_email_verified = true;
+
+CREATE UNIQUE INDEX IF NOT EXISTS unique_verified_email ON users (LOWER(email)) WHERE is_email_verified = true;
+
+-- 4.1.1 LATE BINDING CONSTRAINTS (Resolve Circular Dependencies)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'fk_owner_user'
+    ) THEN
+        ALTER TABLE api_keys 
+        ADD CONSTRAINT fk_owner_user 
+        FOREIGN KEY (owner_user_id) 
+        REFERENCES users(id) 
+        ON DELETE CASCADE;
+    END IF;
+END $$;
 
 -- 4.2 EMAIL VERIFICATION TOKENS
 CREATE TABLE IF NOT EXISTS email_verification_tokens (
@@ -253,8 +268,8 @@ CREATE TABLE IF NOT EXISTS bills (
     bill_id TEXT NOT NULL UNIQUE,
     tx_hash TEXT NOT NULL,
     chain_id INT NOT NULL,
-    user_id UUID,          -- Supabase Internal ID
-    user_address TEXT,     -- Wallet Address
+    user_id UUID,          -- Supabase Internal ID (Modern - preferred)
+    user_address TEXT,     -- Wallet Address (Legacy, kept for backward compat)
     api_key_id UUID REFERENCES api_keys(id),
     bill_json JSONB,
     receipt_hash TEXT,
@@ -265,11 +280,16 @@ CREATE TABLE IF NOT EXISTS bills (
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT bills_tx_chain_unique UNIQUE (tx_hash, chain_id)
+    CONSTRAINT bills_tx_chain_unique UNIQUE (tx_hash, chain_id),
+    
+    -- Foreign key for user tracking
+    CONSTRAINT fk_bills_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_bills_tx_hash ON bills(tx_hash, chain_id);
-CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_address);
+CREATE INDEX IF NOT EXISTS idx_bills_user_id ON bills(user_id);
+CREATE INDEX IF NOT EXISTS idx_bills_user_created ON bills(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bills_user_address ON bills(user_address) WHERE user_address IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bills_expires ON bills(expires_at);
 CREATE INDEX IF NOT EXISTS idx_bills_api_key ON bills(api_key_id);
 
@@ -409,7 +429,11 @@ CREATE TABLE IF NOT EXISTS usage_aggregates (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT usage_aggregates_scope_check
-        CHECK ((scope = 'api_key' AND api_key_id IS NOT NULL AND user_id IS NULL) OR (scope = 'user' AND user_id IS NOT NULL AND api_key_id IS NULL))
+        CHECK (
+            (scope = 'api_key' AND api_key_id IS NOT NULL AND user_id IS NULL) 
+            OR (scope = 'user' AND user_id IS NOT NULL AND api_key_id IS NULL)
+            OR (scope = 'public' AND user_id IS NULL AND api_key_id IS NULL)
+        )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_aggs_apikey ON usage_aggregates(api_key_id, period_start) WHERE scope = 'api_key';

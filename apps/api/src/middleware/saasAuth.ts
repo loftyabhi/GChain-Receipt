@@ -40,9 +40,10 @@ export const saasMiddleware = async (req: Request, res: Response, next: NextFunc
         // =================================================================
         if (isInternal) {
             // Requirement 1: MUST be JWT
-            if (!authHeader?.startsWith('Bearer ') || authHeader.startsWith('Bearer sk_')) {
+            const isApiKey = authHeader?.startsWith('Bearer sk_') || authHeader?.startsWith('Bearer tx_p_');
+            if (!authHeader?.startsWith('Bearer ') || isApiKey) {
                 // If they try to use an API key internally -> BLOCK
-                if (apiKeyHeader || authHeader?.startsWith('Bearer sk_')) {
+                if (apiKeyHeader || isApiKey) {
                     return res.status(403).json({
                         code: 'AUTH_MISMATCH',
                         error: 'API Keys are not accepted on internal endpoints. Use JWT.'
@@ -104,7 +105,8 @@ export const saasMiddleware = async (req: Request, res: Response, next: NextFunc
             let key = '';
             if (apiKeyHeader) {
                 key = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
-            } else if (authHeader?.startsWith('Bearer sk_')) {
+            } else if (authHeader?.startsWith('Bearer sk_') || authHeader?.startsWith('Bearer tx_p_')) {
+                // Support both legacy sk_ and new tx_p_ prefixes
                 key = authHeader.slice(7);
             } else {
                 // If they try to use JWT externally -> BLOCK

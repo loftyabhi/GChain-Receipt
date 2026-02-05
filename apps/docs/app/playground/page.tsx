@@ -233,7 +233,7 @@ export default function PlaygroundPage() {
                                 type="password"
                                 value={apiKey}
                                 onChange={e => setApiKey(e.target.value)}
-                                placeholder={authMode === 'apikey' ? "sk_live_..." : "eyJ..."}
+                                placeholder={authMode === 'apikey' ? "tx_p_live_..." : "eyJ..."}
                                 className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm font-mono focus:ring-2 focus:ring-primary/20 outline-none"
                                 autoComplete="off"
                             />

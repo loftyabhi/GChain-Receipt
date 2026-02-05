@@ -6,7 +6,7 @@ import { AdminLogin } from '../../components/AdminLogin';
 import { Navbar } from '@/components/Navbar';
 import EmailOpsPage from './email/page';
 import axios from 'axios';
-import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight, Mail, RefreshCw } from 'lucide-react';
+import { Trash2, Plus, Megaphone, Shield, Search, X, Loader2, Lock, Unlock, ArrowDownCircle, Settings, Coins, AlertTriangle, Key, BarChart3, Activity, FileText, Globe, Ban, AlertCircle, Copy, Check, ChevronRight, Mail, RefreshCw, ScrollText, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { formatEther, parseEther, erc20Abi, formatUnits } from 'viem';
@@ -39,7 +39,7 @@ export default function DashboardPage() {
     const [isLoadingAuth, setIsLoadingAuth] = useState(true);
     const [csrfToken, setCsrfToken] = useState('');
     const [hasHydrated, setHasHydrated] = useState(false);
-    const [activeTab, setActiveTab] = useState<'ads' | 'vault' | 'contributions' | 'api' | 'users' | 'email'>('ads');
+    const [activeTab, setActiveTab] = useState<'ads' | 'vault' | 'contributions' | 'api' | 'users' | 'email' | 'verify'>('ads');
     const [apiTab, setApiTab] = useState<'keys' | 'analytics' | 'sla' | 'audit'>('keys');
 
     // Data States
@@ -50,7 +50,7 @@ export default function DashboardPage() {
     const [contributions, setContributions] = useState<any[]>([]);
     const [users, setUsers] = useState<any[]>([]);
     const [isLoadingData, setIsLoadingData] = useState(false);
-    const [detailItem, setDetailItem] = useState<{ type: 'audit' | 'contribution' | 'apikey' | 'user', data: any } | null>(null);
+    const [detailItem, setDetailItem] = useState<{ type: 'audit' | 'contribution' | 'apikey' | 'user' | 'logs', data: any } | null>(null);
 
     // Form States
     const [isFormOpen, setIsFormOpen] = useState(false);
@@ -74,6 +74,25 @@ export default function DashboardPage() {
     const [newMinContribution, setNewMinContribution] = useState('');
     const [tokenAddress, setTokenAddress] = useState('');
     const [tokenStatus, setTokenStatus] = useState(true);
+
+    // Verification Tool State
+    const [verifyBillId, setVerifyBillId] = useState('');
+    const [verifyResult, setVerifyResult] = useState<any>(null);
+
+    const handleVerifyReceipt = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const toastId = toast.loading("Verifying integrity...");
+        try {
+            // Note: Verification route is PUBLIC usually, but we are in admin context. 
+            // Assuming it is mounted at /api/v1/verify
+            const res = await axios.post('/api/v1/verify/receipt', { billId: verifyBillId });
+            setVerifyResult(res.data);
+            toast.success("Verification complete", { id: toastId });
+        } catch (err) {
+            handleError(err);
+            toast.dismiss(toastId);
+        }
+    };
 
     // Helper for error handling (hoisted)
     const handleError = (err: any) => {
@@ -409,6 +428,25 @@ export default function DashboardPage() {
         } catch (err) { handleError(err); }
     };
 
+    const handleViewLogs = async (userId: string, userName: string) => {
+        const toastId = toast.loading(`Fetching logs for ${userName}...`);
+        try {
+            const res = await axios.get(`/api/v1/admin/users/${userId}/logs`, { withCredentials: true });
+            setDetailItem({
+                type: 'logs',
+                data: {
+                    userName,
+                    userId,
+                    logs: res.data
+                }
+            });
+            toast.dismiss(toastId);
+        } catch (err) {
+            handleError(err);
+            toast.dismiss(toastId);
+        }
+    };
+
     // --- Original Ads Fetcher ---
     const fetchData = async () => {
         setIsLoadingData(true);
@@ -614,6 +652,9 @@ export default function DashboardPage() {
                             </button>
                             <button onClick={() => setActiveTab('email')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'email' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
                                 <Mail size={16} /> Mail Center
+                            </button>
+                            <button onClick={() => setActiveTab('verify')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'verify' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
+                                <ShieldCheck size={16} /> Verify
                             </button>
                         </>
                     )}
@@ -995,6 +1036,13 @@ export default function DashboardPage() {
                                                 >
                                                     <ArrowDownCircle size={16} />
                                                 </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleViewLogs(u.id, u.name || u.email || 'User'); }}
+                                                    className="p-2 text-zinc-500 hover:text-white bg-white/5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-all ml-2"
+                                                    title="View Activity Logs"
+                                                >
+                                                    <ScrollText size={16} />
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}
@@ -1159,6 +1207,72 @@ export default function DashboardPage() {
                                     </tbody>
                                 </table>
                             </div>
+                        )}
+                    </div>
+                )}
+
+                {/* --- VERIFY TAB --- */}
+                {activeTab === 'verify' && (
+                    <div className="max-w-xl mx-auto">
+                        <div className="text-center mb-8">
+                            <ShieldCheck size={48} className="mx-auto text-violet-500 mb-4" />
+                            <h2 className="text-2xl font-bold text-white mb-2">Cryptographic Verification</h2>
+                            <p className="text-zinc-400">Manually verify the integrity of any receipt generated by the system.</p>
+                        </div>
+
+                        <div className="bg-white/5 border border-white/10 rounded-3xl p-8 mb-8 backdrop-blur-sm">
+                            <form onSubmit={handleVerifyReceipt} className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Bill ID (UUID)</label>
+                                    <input
+                                        type="text"
+                                        value={verifyBillId}
+                                        onChange={e => setVerifyBillId(e.target.value)}
+                                        className="w-full bg-black/20 border border-white/10 rounded-xl p-4 text-white font-mono placeholder:text-zinc-600 focus:border-violet-500 outline-none transition-colors"
+                                        placeholder="e.g. 550e8400-e29b..."
+                                        required
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-violet-500/20 transition-all active:scale-95"
+                                >
+                                    Verify Integrity
+                                </button>
+                            </form>
+                        </div>
+
+                        {verifyResult && (
+                            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`rounded-3xl border p-8 ${verifyResult.valid ? 'bg-green-500/5 border-green-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                                <div className="flex items-center gap-4 mb-6">
+                                    <div className={`p-3 rounded-full ${verifyResult.valid ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-500'}`}>
+                                        {verifyResult.valid ? <Check size={24} /> : <AlertTriangle size={24} />}
+                                    </div>
+                                    <div>
+                                        <h3 className={`text-xl font-bold ${verifyResult.valid ? 'text-green-400' : 'text-red-500'}`}>
+                                            {verifyResult.valid ? 'Signature Valid' : 'Integrity Check Failed'}
+                                        </h3>
+                                        <p className="text-zinc-400 text-sm">Processed at {new Date(verifyResult.verified_at).toLocaleTimeString()}</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-zinc-500 uppercase mb-1">Algorithm</label>
+                                        <div className="font-mono text-sm text-zinc-300 bg-black/20 px-3 py-2 rounded-lg border border-white/5">{verifyResult.algorithm}</div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-zinc-500 uppercase mb-1">Stored Hash (Database)</label>
+                                        <div className="font-mono text-xs text-zinc-400 break-all bg-black/20 px-3 py-2 rounded-lg border border-white/5">{verifyResult.storedHash}</div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-zinc-500 uppercase mb-1">Computed Hash (Live Re-hash)</label>
+                                        <div className={`font-mono text-xs break-all px-3 py-2 rounded-lg border ${verifyResult.valid ? 'text-green-400 border-green-500/20 bg-green-500/5' : 'text-red-400 border-red-500/20 bg-red-500/5'}`}>
+                                            {verifyResult.computedHash}
+                                        </div>
+                                    </div>
+                                </div>
+                            </motion.div>
                         )}
                     </div>
                 )}
@@ -1439,11 +1553,46 @@ export default function DashboardPage() {
                                     {detailItem.type === 'audit' && <><FileText size={20} /> Audit Log Details</>}
                                     {detailItem.type === 'contribution' && <><Coins size={20} /> Contribution Details</>}
                                     {detailItem.type === 'apikey' && <><Key size={20} /> API Key Details</>}
+                                    {detailItem.type === 'logs' && <><ScrollText size={20} /> User Activity Logs</>}
                                 </h2>
                                 <button onClick={() => setDetailItem(null)} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><X size={20} /></button>
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                {/* LOGS VIEW */}
+                                {detailItem.type === 'logs' && (
+                                    <>
+                                        <div className="mb-6 bg-white/5 p-4 rounded-xl border border-white/10">
+                                            <div className="text-xs font-bold text-zinc-500 uppercase">User</div>
+                                            <div className="font-bold text-white text-lg">{detailItem.data.userName}</div>
+                                            <div className="font-mono text-xs text-zinc-400">{detailItem.data.userId}</div>
+                                        </div>
+                                        <div className="space-y-4">
+                                            {detailItem.data.logs?.length === 0 ? (
+                                                <div className="text-center text-zinc-500 py-8">No activity logs found.</div>
+                                            ) : (
+                                                detailItem.data.logs.map((log: any) => (
+                                                    <div key={log.id} className="bg-white/5 border border-white/10 p-4 rounded-xl flex items-start justify-between gap-4">
+                                                        <div>
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${log.status_code >= 400 ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-400'}`}>
+                                                                    {log.method} {log.status_code}
+                                                                </span>
+                                                                <span className="text-xs text-zinc-400 font-mono">{new Date(log.created_at).toLocaleString()}</span>
+                                                            </div>
+                                                            <div className="text-sm font-mono text-zinc-300 break-all">{log.endpoint}</div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="text-xs font-bold text-zinc-500">{log.duration_ms}ms</div>
+                                                            <div className="text-[10px] text-zinc-600 font-mono">{log.ip_address}</div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+
                                 {/* AUDIT LOG VIEW */}
                                 {detailItem.type === 'audit' && (
                                     <>

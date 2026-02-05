@@ -6,6 +6,8 @@ interface EmailStats {
     queued: number;
     sent: number;
     failed: number;
+    opened?: number;
+    clicked?: number;
     recentFailures: any[];
 }
 
@@ -38,18 +40,34 @@ export default function DeliveryMonitor() {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                    <h3 className="text-gray-400 text-sm font-medium">Queued</h3>
-                    <p className="text-3xl font-bold text-yellow-400 mt-2">{stats.queued}</p>
+            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                <h3 className="text-gray-400 text-sm font-medium">Queued</h3>
+                <p className="text-3xl font-bold text-yellow-400 mt-2">{stats.queued}</p>
+            </div>
+            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                <h3 className="text-gray-400 text-sm font-medium">Sent</h3>
+                <p className="text-3xl font-bold text-green-400 mt-2">{stats.sent}</p>
+            </div>
+            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                <h3 className="text-gray-400 text-sm font-medium">Failed</h3>
+                <p className="text-3xl font-bold text-red-400 mt-2">{stats.failed}</p>
+            </div>
+            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                <h3 className="text-gray-400 text-sm font-medium">Opens</h3>
+                <div className="flex items-baseline gap-2 mt-2">
+                    <span className="text-3xl font-bold text-blue-400">{stats.opened || 0}</span>
+                    <span className="text-xs text-gray-500">
+                        ({stats.sent > 0 ? Math.round(((stats.opened || 0) / stats.sent) * 100) : 0}%)
+                    </span>
                 </div>
-                <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                    <h3 className="text-gray-400 text-sm font-medium">Sent</h3>
-                    <p className="text-3xl font-bold text-green-400 mt-2">{stats.sent}</p>
-                </div>
-                <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                    <h3 className="text-gray-400 text-sm font-medium">Failed</h3>
-                    <p className="text-3xl font-bold text-red-400 mt-2">{stats.failed}</p>
+            </div>
+            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                <h3 className="text-gray-400 text-sm font-medium">Clicks</h3>
+                <div className="flex items-baseline gap-2 mt-2">
+                    <span className="text-3xl font-bold text-violet-400">{stats.clicked || 0}</span>
+                    <span className="text-xs text-gray-500">
+                        ({(stats.opened || 0) > 0 ? Math.round(((stats.clicked || 0) / (stats.opened || 1)) * 100) : 0}%)
+                    </span>
                 </div>
             </div>
 

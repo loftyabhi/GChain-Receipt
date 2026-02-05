@@ -778,11 +778,26 @@ router.get('/email/templates', async (req: Request, res: Response) => {
  */
 router.post('/email/templates', async (req: Request, res: Response) => {
     try {
-        const { name, subject, htmlContent, category } = req.body;
+        const { name, subject, htmlContent, category, senderType } = req.body;
 
         // Basic validation
         if (!name || !subject || !htmlContent || !category) {
             return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Validate category
+        if (!['transactional', 'promotional'].includes(category)) {
+            return res.status(400).json({ error: 'Invalid category. Must be transactional or promotional' });
+        }
+
+        // Validate senderType if provided
+        const validSenderTypes = ['verify', 'security', 'support', 'notifications', 'promo'];
+        const finalSenderType = senderType || 'support'; // Default to support
+
+        if (!validSenderTypes.includes(finalSenderType)) {
+            return res.status(400).json({
+                error: `Invalid sender_type. Must be one of: ${validSenderTypes.join(', ')}`
+            });
         }
 
         const { data, error } = await supabase
@@ -791,23 +806,28 @@ router.post('/email/templates', async (req: Request, res: Response) => {
                 name,
                 subject,
                 html_content: htmlContent,
-                category
+                category,
+                sender_type: finalSenderType
             })
             .select()
             .single();
 
-        if (error) throw error;
+        if (error) {
+            logger.error('Email template creation error', { error: error.message, details: error });
+            throw error;
+        }
 
         await auditService.log({
             actorId: (req as any).user?.address || 'admin',
             action: 'EMAIL_TEMPLATE_CREATED',
             targetId: data.id,
-            metadata: { name, category },
+            metadata: { name, category, sender_type: finalSenderType },
             ip: req.ip
         });
 
         res.json(data);
     } catch (e: any) {
+        logger.error('Email template POST error', { error: e.message });
         res.status(500).json({ error: e.message });
     }
 });
@@ -945,6 +965,10 @@ router.get('/email/stats', async (req: Request, res: Response) => {
         const { count: sent } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).eq('status', 'sent');
         const { count: failed } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).in('status', ['failed', 'permanent_fail']);
 
+        // Tracking metrics
+        const { count: opened } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).not('opened_at', 'is', null);
+        const { count: clicked } = await supabase.from('email_jobs').select('*', { count: 'exact', head: true }).not('clicked_at', 'is', null);
+
         // Recent failures
         const { data: recentFailures } = await supabase
             .from('email_jobs')
@@ -954,9 +978,11 @@ router.get('/email/stats', async (req: Request, res: Response) => {
             .limit(10);
 
         res.json({
-            queued,
-            sent,
-            failed,
+            queued: queued || 0,
+            sent: sent || 0,
+            failed: failed || 0,
+            opened: opened || 0,
+            clicked: clicked || 0,
             recentFailures
         });
     } catch (e: any) {

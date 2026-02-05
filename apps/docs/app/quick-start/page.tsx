@@ -28,10 +28,13 @@ export default function QuickStart() {
 // 1. Submit Receipt Request
 const res = await fetch('https://api.txproof.xyz/api/v1/bills/resolve', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 
+    'Content-Type': 'application/json',
+    'X-API-Key': 'sk_live_...' // Optional for public, required for higher limits
+  },
   body: JSON.stringify({
-    txHash: '0x123...', // Replace with actual Tx Hash
-    chainId: 1         // 1 = Mainnet, 137 = Polygon, etc.
+    txHash: '0x51c68f2c3d5e2d6b3a3c754630a969f6e4a2c070', // Example Base Tx
+    chainId: 8453
   })
 });
 
@@ -43,14 +46,14 @@ const poll = async (id) => {
   const statusRes = await fetch(\`https://api.txproof.xyz/api/v1/bills/job/\${id}\`);
   const data = await statusRes.json();
   
-  if (data.status === 'completed') {
-    console.log("PDF Ready:", data.data.pdfUrl);
-    console.log("Metadata:", data.data.bill);
-  } else if (data.status === 'failed') {
+  if (data.state === 'completed') {
+    console.log("PDF Ready:", data.pdfUrl);
+    console.log("Bill Data:", data.data);
+  } else if (data.state === 'failed') {
     console.error("Job Failed:", data.error);
   } else {
     // Retry after 2s
-    console.log("Status:", data.status);
+    console.log("Status:", data.state, "Queue Pos:", data.queuePosition);
     setTimeout(() => poll(id), 2000);
   }
 };
@@ -62,20 +65,22 @@ poll(jobId);
 # 1. Start Job
 curl -X POST https://api.txproof.xyz/api/v1/bills/resolve \\
   -H "Content-Type: application/json" \\
-  -d '{"txHash": "0xc75...", "chainId": 1}'
+  -H "X-API-Key: sk_live_..." \\
+  -d '{
+    "txHash": "0x51c68f2c3d5e2d6b3a3c754630a969f6e4a2c070",
+    "chainId": 8453
+  }'
 
-# Response: { "jobId": "job_123", "status": "pending" }
+# Response: { "jobId": "job_123", "state": "pending" }
 
 # 2. Poll Status (Repeat until completed)
 curl https://api.txproof.xyz/api/v1/bills/job/job_123
 
 # Response (Completed):
 # {
-#   "status": "completed",
-#   "data": {
-#     "pdfUrl": "https://...",
-#     "bill": { ... }
-#   }
+#   "state": "completed",
+#   "pdfUrl": "https://storage.supabase.co/...",
+#   "data": { ... }
 # }
 `;
 

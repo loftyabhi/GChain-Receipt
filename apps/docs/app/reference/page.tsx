@@ -162,21 +162,33 @@ export default function Reference() {
 
             {/* --- VERIFICATION --- */}
             <div className="space-y-6 pt-12">
-                <h2 className="text-2xl font-bold border-b pb-2">Verification</h2>
+                <h2 className="text-2xl font-bold border-b pb-2">Receipt Verification</h2>
 
                 {/* POST /verify/receipt */}
                 <Endpoint method="POST" path="/api/v1/verify/receipt">
                     <div className="space-y-6">
                         <p className="text-muted-foreground leading-relaxed">
-                            Cryptographically verify a receipt's integrity against its stored hash.
+                            Cryptographically verify a receipt's integrity against its stored hash in the database.
                         </p>
-                        <CodeBlock language="json" code={`// Response
-{
+
+                        <div>
+                            <h4 className="font-semibold text-sm uppercase text-foreground/70 mb-3 tracking-wider">Example Request</h4>
+                            <CodeBlock language="bash" code={`curl -X POST https://api.txproof.xyz/api/v1/verify/receipt \\
+  -H "Content-Type: application/json" \\
+  -d '{ "billId": "550e8400-e29b-41d4-a716-446655440000" }'`} />
+                        </div>
+
+                        <div>
+                            <h4 className="font-semibold text-sm uppercase text-foreground/70 mb-3 tracking-wider">Response</h4>
+                            <CodeBlock language="json" code={`{
   "valid": true,
-  "billId": "bill-1-0x...",
+  "billId": "550e8400-e29b-41d4-a716-446655440000",
   "algorithm": "keccak256",
+  "storedHash": "0xabc123...",
+  "computedHash": "0xabc123...",
   "verified_at": "2024-03-20T10:00:00Z"
 }`} />
+                        </div>
                     </div>
                 </Endpoint>
             </div>

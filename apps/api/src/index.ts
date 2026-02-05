@@ -58,7 +58,9 @@ app.use(cors({
             callback(new Error(`Not allowed by CORS: ${origin}`));
         }
     },
-    credentials: true
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'], // Allow custom API key header
+    exposedHeaders: ['X-Quota-Limit', 'X-Quota-Used', 'X-Quota-Remaining'] // Expose quota headers to client
 }));
 
 // Host Header Guard to protect backend.txproof.xyz
