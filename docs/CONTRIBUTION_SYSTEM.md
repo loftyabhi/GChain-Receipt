@@ -81,7 +81,7 @@ Transactions move through three states in `pending_contributions`:
 *   **Service**: `apps/api/src/services/ContributionService.ts`
     *   Handles receipt verification validation.
 *   **Endpoint**: `POST /api/contributions/submit`
-*   **Worker**: `apps/api/src/scripts/retry_contributions.ts`
+
 
 ### B. Smart Contract Layer
 *   **File**: `packages/contracts/contracts/SupportVault.sol`
@@ -110,16 +110,11 @@ curl -X POST http://localhost:3001/api/contributions/submit \
 ```
 
 ### Running the Retry Worker
-The worker should run systematically (e.g., via Cron every 5 minutes).
-```bash
-npm run test:verification -w apps/api  # Or direct: npx ts-node apps/api/src/scripts/retry_contributions.ts
-```
+The retry logic is handled automatically by the background worker.
 
 ### Legacy Backfill
 If the database is lost, use the legacy indexer to rebuild history:
-```bash
-npx ts-node apps/api/scripts/run_indexer.ts --backfill
-```
+The legacy indexer script has been deprecated and removed.
 
 ---
 
@@ -127,6 +122,6 @@ npx ts-node apps/api/scripts/run_indexer.ts --backfill
 
 | Issue | Cause | Fix |
 |Str|Str|Str|
-| **Stuck in `pending`** | Not enough confirmations (<5 blocks) or RPC lag. | Wait or run `retry_contributions.ts`. |
+| **Stuck in `pending`** | Not enough confirmations (<5 blocks) or RPC lag. | Wait for automatic retry. |
 | **`failed` (FAILED_NO_EVENT)** | Transaction succeeded but `Contributed` event is missing. | Check if the tx was sent to correct proxy/contract. |
 | **`failed` (FAILED_WRONG_CONTRACT)** | `tx.to` does not match ENV `SUPPORT_VAULT_ADDRESS`. | Verify frontend ENV vs backend ENV. |

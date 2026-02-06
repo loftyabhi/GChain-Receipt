@@ -15,6 +15,7 @@ export const docsConfig = {
                 { title: "Status Lifecycle", href: "/status-lifecycle" },
                 { title: "Errors & Codes", href: "/errors" },
                 { title: "Rate Limits", href: "/rate-limits" },
+                { title: "Webhooks", href: "/webhooks" },
             ],
         },
         {
