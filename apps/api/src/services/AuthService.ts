@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { randomBytes, createHash } from 'crypto';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
+import { UserService } from './UserService';
 
 interface AuthResponse {
     token: string;
@@ -53,7 +54,7 @@ export class AuthService {
      * Verify signature AND consume nonce (One-Time Use)
      */
     async verifyAndConsumeNonce(walletAddress: string, signature: string, nonce: string): Promise<boolean> {
-        // 1. Crypto Verification
+        // 1. Verify Signature
         let recoveredAddress: string;
         try {
             recoveredAddress = ethers.verifyMessage(nonce, signature).toLowerCase();
@@ -65,7 +66,7 @@ export class AuthService {
             throw new Error('Signature mismatch');
         }
 
-        // 2. DB Verification (Check existence, expiry, and usage)
+        // 2. DB Verification
         const { data: nonceRecord, error } = await supabase
             .from('auth_nonces')
             .select('*')
@@ -85,7 +86,7 @@ export class AuthService {
             throw new Error('Nonce expired');
         }
 
-        // 3. Mark as Used (Atomic-ish due to single row update)
+        // 3. Mark as Used
         const { error: updateError } = await supabase
             .from('auth_nonces')
             .update({ used_at: new Date().toISOString() })
@@ -108,38 +109,26 @@ export class AuthService {
         // 1. Verify
         await this.verifyAndConsumeNonce(walletAddress, signature, nonce);
 
-        // 2. Upsert User (Ensure ID exists)
-        // We select first to get ID if exists
-        let { data: user, error: fetchError } = await supabase
+        // 2. Identity Resolution (Centralized)
+        const userService = new UserService();
+        const userId = await userService.ensureUser(walletAddress);
+
+        // 3. Status Check
+        const { data: user, error: fetchError } = await supabase
             .from('users')
             .select('id, wallet_address, account_status')
-            .eq('wallet_address', walletAddress.toLowerCase())
+            .eq('id', userId)
             .single();
 
-        if (!user) {
-            // Create new user
-            const { data: newUser, error: createError } = await supabase
-                .from('users')
-                .insert({ wallet_address: walletAddress.toLowerCase(), account_status: 'active' })
-                .select()
-                .single();
-
-            if (createError || !newUser) {
-                logger.error('Failed to create user', createError);
-                throw new Error('User creation failed');
-            }
-            user = newUser;
-        }
-
-        if (!user) {
-            throw new Error('User not found');
+        if (fetchError || !user) {
+            throw new Error('User retrieval failed after creation');
         }
 
         if (user.account_status !== 'active') {
             throw new Error(`Login failed: Account is ${user.account_status}. Please contact support.`);
         }
 
-        // 3. Issue Token
+        // 4. Issue Token
         const csrfToken = randomBytes(32).toString('hex');
         const csrfHash = createHash('sha256').update(csrfToken).digest('hex');
 
@@ -148,7 +137,7 @@ export class AuthService {
             id: user.id, // UUID
             address: user.wallet_address,
             csrfHash
-        }, this.jwtSecret, { expiresIn: '24h' }); // Users get longer sessions?
+        }, this.jwtSecret, { expiresIn: '24h' });
 
         return {
             token,
@@ -163,37 +152,29 @@ export class AuthService {
 
     /**
      * Verify a wallet signature and issue a JWT if the signer is an admin.
-     * @param address The wallet address claiming to be admin.
-     * @param signature The signature produced by the wallet.
-     * @param nonce The nonce that was signed (e.g., "Login to Chain Receipt at 1234567890").
      */
     async loginAdmin(address: string, signature: string, nonce: string): Promise<AuthResponse> {
         if (!this.adminAddress) {
             throw new Error('ADMIN_ADDRESS environment variable not set');
         }
 
-        // 1. Recover Address from Signature
         const recoveredAddress = ethers.verifyMessage(nonce, signature).toLowerCase();
 
-        // 2. Verify Address matches Claim
         if (recoveredAddress !== address.toLowerCase()) {
             throw new Error('Signature verification failed: Address mismatch');
         }
 
-        // 3. Verify Address is Admin
         if (recoveredAddress !== this.adminAddress) {
             throw new Error('Unauthorized: Wallet is not an admin');
         }
 
-        // 4. Generate CSRF Token and Hash
         const csrfToken = randomBytes(32).toString('hex');
         const csrfHash = createHash('sha256').update(csrfToken).digest('hex');
 
-        // 5. Issue Token with CSRF Hash
         const token = jwt.sign({
             role: 'admin',
             address: recoveredAddress,
-            csrfHash // Bind session to this specific CSRF token
+            csrfHash
         }, this.jwtSecret, {
             expiresIn: '30m',
         });
@@ -201,13 +182,10 @@ export class AuthService {
         return {
             token,
             csrfToken,
-            expiresIn: 1800, // 30 minutes
+            expiresIn: 1800,
         };
     }
 
-    /**
-     * Issue a rotated session (new JWT + new CSRF) for an existing valid user
-     */
     rotateSession(currentPayload: any): AuthResponse {
         const csrfToken = randomBytes(32).toString('hex');
         const csrfHash = createHash('sha256').update(csrfToken).digest('hex');
@@ -222,20 +200,10 @@ export class AuthService {
         return { token, csrfToken, expiresIn: 1800 };
     }
 
-    /**
-     * Generate a random nonce message for the user to sign.
-     * (Deprecated for Users, used for Admin simple flow?)
-     * Admin flow doesn't check DB nonces currently. We keep this for Admin legacy.
-     */
     generateNonce(): string {
         return `Sign this message to login to TxProof Manager.\nNonce: ${Date.now()}-${Math.random().toString(36).substring(7)}`;
     }
 
-    /**
-     * Verify a JWT token.
-     * @param token The JWT token string.
-     * @returns The decoded payload if valid, throws error otherwise.
-     */
     verifyToken(token: string): any {
         try {
             return jwt.verify(token, this.jwtSecret);

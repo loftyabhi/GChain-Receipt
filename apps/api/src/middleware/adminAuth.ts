@@ -1,19 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import { createHash } from 'crypto';
 import { AuthService } from '../services/AuthService';
+import { ApiKeyService } from '../services/ApiKeyService';
 
 const authService = new AuthService();
+const apiKeyService = new ApiKeyService();
 
 /**
  * Enterprise-grade Admin Verification Middleware
  * 
- * Features:
- * 1. Multi-source Token Lookup (Cookie > Header)
- * 2. Role Enforcement (JWT claim check)
- * 3. CSRF Protection for mutating requests
- * 4. Cache-Control enforcement for authed responses
+ * STRICT ARCHITECTURE UPDATE:
+ * - Enforces correct JWT authentication.
+ * - INJECTS 'SYSTEM_INTERNAL_API_KEY' ID into request context.
+ * - This ensures downstream usage logging always has a valid API Key ID.
  */
-export const verifyAdmin = (req: Request, res: Response, next: NextFunction) => {
+export const verifyAdmin = async (req: Request, res: Response, next: NextFunction) => {
     // 1. Try Cookie first (Browser flow)
     let token = req.cookies?.admin_token;
 
@@ -24,6 +25,7 @@ export const verifyAdmin = (req: Request, res: Response, next: NextFunction) => 
     }
 
     if (!token) {
+        // Strict: No token = No Access
         res.status(401).json({ error: 'No token provided' });
         return;
     }
@@ -36,13 +38,13 @@ export const verifyAdmin = (req: Request, res: Response, next: NextFunction) => 
             throw new Error('Unauthorized: Admin role required');
         }
 
-        // Security: Verify current authorized address (in case ENV changed)
+        // Security: Verify current authorized address checks
         const currentAdmin = process.env.ADMIN_ADDRESS?.toLowerCase();
         if (!currentAdmin || payload.address?.toLowerCase() !== currentAdmin) {
             throw new Error('Unauthorized: Session no longer matches configured admin');
         }
 
-        // Security: CSRF Check for mutating requests (POST, PUT, DELETE, PATCH)
+        // Security: CSRF Check for mutating requests
         const isMutating = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method);
         if (isMutating) {
             const csrfHeader = req.headers['x-csrf-token'];
@@ -60,6 +62,18 @@ export const verifyAdmin = (req: Request, res: Response, next: NextFunction) => 
 
         // Attach user to request
         (req as any).user = payload;
+
+        // =========================================================
+        // STRICT INVARIANT: INJECT SYSTEM API KEY ID
+        // =========================================================
+        // Admin traffic is internal traffic. It must be logged against the System Key.
+        try {
+            const systemKeyId = await apiKeyService.getSystemApiKeyId();
+            (req as any).apiKeyId = systemKeyId;
+        } catch (sysError) {
+            console.error('CRITICAL: Failed to resolve System API Key during Admin Auth', sysError);
+            throw new Error('System Integrity Failure: Internal Key Missing');
+        }
 
         // Anti-Caching for privileged data
         res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');

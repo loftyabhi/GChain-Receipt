@@ -60,11 +60,8 @@ router.get('/me', (req: Request, res: Response) => {
 router.get('/keys', async (req: Request, res: Response) => {
     try {
         const { data, error } = await supabase
-            .from('api_keys')
-            .select(`
-                *,
-                plan:plans(name)
-            `)
+            .from('view_api_keys_enriched')
+            .select('*')
             .order('created_at', { ascending: false })
             .limit(50);
 
@@ -198,7 +195,7 @@ router.get('/usage', async (req: Request, res: Response) => {
         const { data: sla } = await supabase
             .from('distinct_daily_metrics')
             .select('*')
-            .limit(1);
+            .single();
 
         res.json({
             metrics: {
@@ -209,7 +206,7 @@ router.get('/usage', async (req: Request, res: Response) => {
             },
             recentErrors: errors,
             topKeys: topKeys,
-            sla: sla?.[0]
+            sla: sla || { p50_latency: 0, p95_latency: 0, failure_count: 0 }
         });
 
     } catch (e: any) {
@@ -330,18 +327,56 @@ router.post('/contributions/:id/revalidate', async (req: Request, res: Response)
  */
 router.get('/users', async (req: Request, res: Response) => {
     try {
-        const { data, error } = await supabase
+        const { data: rawUsers, error } = await supabase
             .from('users')
             .select('*')
             .order('created_at', { ascending: false })
             .limit(100);
 
         if (error) throw error;
-        res.json(data);
+
+        // Handle empty users case immediately
+        if (!rawUsers || rawUsers.length === 0) {
+            return res.json([]);
+        }
+
+        // Fetch active keys for these users separately to avoid ambiguous JOINs
+        const userIds = rawUsers.map((u: any) => u.id);
+        const { data: allKeys } = await supabase
+            .from('api_keys')
+            .select('owner_user_id, quota_limit')
+            .in('owner_user_id', userIds)
+            .eq('is_active', true);
+
+        // Group keys by user
+        const keysByUser: Record<string, any[]> = {};
+        if (allKeys) {
+            for (const k of allKeys) {
+                if (!keysByUser[k.owner_user_id]) keysByUser[k.owner_user_id] = [];
+                keysByUser[k.owner_user_id].push(k);
+            }
+        }
+
+        // Calculate effective quota
+        const users = rawUsers.map((u: any) => {
+            const activeKeys = keysByUser[u.id] || [];
+            const effectiveQuota = activeKeys.length > 0
+                ? activeKeys.reduce((sum: number, k: any) => sum + (k.quota_limit || 0), 0)
+                : u.monthly_quota;
+
+            return {
+                ...u,
+                monthly_quota: effectiveQuota,
+                _derived_quota_source: activeKeys.length > 0 ? 'api_keys_sum' : 'user_default'
+            };
+        });
+
+        res.json(users);
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
 });
+
 
 /**
  * GET /api/v1/admin/users/:id/logs

@@ -4,11 +4,12 @@ interface StatsProps {
     usageData: { logs_count: number };
     totalQuota: number;
     billingTier: string;
+    isSystemOperational: boolean;
 }
 
-export const OverviewStats: React.FC<StatsProps> = ({ usageData, totalQuota, billingTier }) => {
+export const OverviewStats: React.FC<StatsProps> = ({ usageData, totalQuota, billingTier, isSystemOperational }) => {
     // Calculate global percentage or other derived metrics
-    const pct = Math.min(100, (usageData.logs_count / (totalQuota || 1)) * 100);
+    const pct = totalQuota > 0 ? Math.min(100, (usageData.logs_count / totalQuota) * 100) : 0;
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -39,10 +40,21 @@ export const OverviewStats: React.FC<StatsProps> = ({ usageData, totalQuota, bil
             <div className="bg-white/5 border border-white/10 p-6 rounded-2xl">
                 <div className="text-sm text-gray-400 mb-2">Platform Health</div>
                 <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
-                    <span className="text-xl font-medium text-white">Operational</span>
+                    {isSystemOperational ? (
+                        <>
+                            <div className="w-3 h-3 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                            <span className="text-xl font-medium text-white">Operational</span>
+                        </>
+                    ) : (
+                        <>
+                            <div className="w-3 h-3 bg-red-500 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
+                            <span className="text-xl font-medium text-white">Degraded</span>
+                        </>
+                    )}
                 </div>
-                <div className="text-xs text-gray-500 mt-2">All systems valid. No outages.</div>
+                <div className="text-xs text-gray-500 mt-2">
+                    {isSystemOperational ? 'All systems valid. No outages.' : 'Some services are experiencing issues.'}
+                </div>
             </div>
         </div>
     );

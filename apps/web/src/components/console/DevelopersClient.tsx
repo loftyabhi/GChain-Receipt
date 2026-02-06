@@ -8,7 +8,7 @@ import { OverviewStats } from '@/components/console/OverviewStats';
 import { DashboardLoader } from '@/components/console/DashboardLoader';
 import { WebhookManager } from '@/components/console/WebhookManager';
 import { UsageAnalytics } from '@/components/console/UsageAnalytics';
-import { useAccount } from 'wagmi';
+import { useAccount, useDisconnect } from 'wagmi';
 
 import { toast } from 'sonner';
 import { ProfileModal } from '@/components/console/ProfileModal';
@@ -16,6 +16,7 @@ import { ProfileModal } from '@/components/console/ProfileModal';
 export function DevelopersClient() {
     const { isAuthenticated, isLoading: isAuthLoading, token, logout } = useConsoleAuth();
     const { isConnected } = useAccount();
+    const { disconnectAsync } = useDisconnect();
 
     const [activeTab, setActiveTab] = useState<'overview' | 'keys' | 'webhooks' | 'usage'>('overview');
 
@@ -27,7 +28,9 @@ export function DevelopersClient() {
     const [userProfile, setUserProfile] = useState<any>(null);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-    // Fetch Data
+    const [isSystemOperational, setIsSystemOperational] = useState(true);
+
+    // ... (fetchData)
     const fetchData = React.useCallback(async () => {
         if (!token) return;
         setIsLoadingData(true);
@@ -43,9 +46,12 @@ export function DevelopersClient() {
             if (usageRes.ok) setUsage(await usageRes.json());
             if (meRes.ok) setUserProfile(await meRes.json());
 
+            setIsSystemOperational(keysRes.ok && usageRes.ok && meRes.ok);
+
         } catch (e) {
             console.error(e);
             toast.error('Failed to load dashboard data');
+            setIsSystemOperational(false); // Assume outage if fetch fails
         } finally {
             setIsLoadingData(false);
         }
@@ -76,7 +82,8 @@ export function DevelopersClient() {
             }
 
             const newKeyData = await res.json();
-            setShowNewKey(newKeyData.key);
+            // Backend returns { apiKey: "..." }
+            setShowNewKey(newKeyData.apiKey);
             toast.success('API Key created successfully');
             await fetchData();
         } catch (e: any) {
@@ -106,9 +113,28 @@ export function DevelopersClient() {
         }
     };
 
-    const activeKey = keys.find(k => k.is_active);
-    const totalQuota = activeKey?.plan?.monthly_quota || 100;
-    const planName = activeKey?.plan?.name || (keys.length > 0 ? 'Revoked' : 'Free');
+    // --- Aggregation Logic ---
+    const activeKeys = keys.filter(k => k.is_active);
+
+    // 1. Calculate Total Usage and Limit
+    const totalUsage = activeKeys.reduce((acc, k) => acc + (k.usage_month || 0), 0);
+    const totalLimit = activeKeys.reduce((acc, k) => acc + (k.quota_limit || k.plan?.monthly_quota || 0), 0);
+
+    // 2. Determine Highest Plan
+    const PLAN_PRIORITY: Record<string, number> = { 'Free': 0, 'Start-up': 5, 'Pro': 10, 'Enterprise': 20 };
+    const highestPlanKey = activeKeys.sort((a, b) => {
+        const pA = PLAN_PRIORITY[a.plan?.name || 'Free'] || 0;
+        const pB = PLAN_PRIORITY[b.plan?.name || 'Free'] || 0;
+        return pB - pA; // Descending
+    })[0];
+
+    const displayPlanName = activeKeys.length === 0 ? 'No Active Plan' : (highestPlanKey?.plan?.name || 'Free');
+
+    // Fallback?
+    // If no keys, limit is 0? Or user default? 
+    // API returns effective quota in /me, but we calculate here from keys.
+    // Let's stick to keys aggregation as requested "all active api keys total allowed".
+    const displayLimit = activeKeys.length === 0 ? 0 : totalLimit;
 
     if (isAuthLoading) {
         return (
@@ -146,7 +172,14 @@ export function DevelopersClient() {
                             </span>
                         </button>
                         <button
-                            onClick={logout}
+                            onClick={async () => {
+                                try {
+                                    await disconnectAsync();
+                                } catch (e) {
+                                    console.error('Failed to disconnect wallet', e);
+                                }
+                                logout();
+                            }}
                             className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-colors"
                         >
                             Sign Out
@@ -161,8 +194,8 @@ export function DevelopersClient() {
                             key={tab}
                             onClick={() => setActiveTab(tab)}
                             className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap capitalize ${activeTab === tab
-                                    ? 'border-blue-500 text-blue-400'
-                                    : 'border-transparent text-gray-400 hover:text-white hover:border-white/20'
+                                ? 'border-blue-500 text-blue-400'
+                                : 'border-transparent text-gray-400 hover:text-white hover:border-white/20'
                                 }`}
                         >
                             {tab}
@@ -175,9 +208,10 @@ export function DevelopersClient() {
                     {activeTab === 'overview' && (
                         <div className="space-y-8 animate-in fade-in duration-300">
                             <OverviewStats
-                                usageData={usage}
-                                totalQuota={totalQuota}
-                                billingTier={planName}
+                                usageData={{ logs_count: totalUsage }}
+                                totalQuota={displayLimit}
+                                billingTier={displayPlanName}
+                                isSystemOperational={isSystemOperational}
                             />
                             {/* Documentation / Help */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

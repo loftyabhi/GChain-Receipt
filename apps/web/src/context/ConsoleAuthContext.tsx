@@ -62,6 +62,9 @@ export function ConsoleAuthProvider({ children }: { children: React.ReactNode })
         }
     }, []);
 
+    // Monitor Wallet Changes logic moved to bottom
+
+
     const login = useCallback(async () => {
         if (!address) throw new Error('Wallet not connected');
 
@@ -126,6 +129,21 @@ export function ConsoleAuthProvider({ children }: { children: React.ReactNode })
         });
         router.push('/developers');
     }, [router]);
+
+    // Monitor Wallet Changes
+    useEffect(() => {
+        if (state.isAuthenticated && state.user && address) {
+            // If connected wallet is different from session wallet, logout
+            if (address.toLowerCase() !== state.user.wallet.toLowerCase()) {
+                logout();
+            }
+        } else if (state.isAuthenticated && !address) {
+            // Optional: If wallet disconnects completely, do we logout? 
+            // Ideally yes, for security, or at least lock the session.
+            // For now, let's strictly enforce: No Wallet = No Session
+            logout();
+        }
+    }, [address, state.isAuthenticated, state.user, logout]);
 
     return (
         <ConsoleAuthContext.Provider value={{ ...state, login, logout }}>

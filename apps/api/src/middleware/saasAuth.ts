@@ -1,144 +1,110 @@
 import { Request, Response, NextFunction } from 'express';
 import { ApiKeyService, ApiKeyDetails } from '../services/ApiKeyService';
 import { UsageService } from '../services/UsageService';
-import { AnalyticsService } from '../services/AnalyticsService';
 
 const apiKeyService = new ApiKeyService();
 const usageService = new UsageService();
-const analyticsService = new AnalyticsService();
 
-// Extended Request type to include auth context
 export interface AuthenticatedRequest extends Request {
     auth?: ApiKeyDetails; // Public API Context
     user?: { id: string; wallet_address: string; role?: string }; // Internal User Context
+    apiKeyId?: string; // INVARIANT: ALWAYS PRESENT
 }
 
 // Trust Configuration
 const INTERNAL_DOMAINS = ['backend.txproof.xyz', 'localhost', '127.0.0.1'];
-const PUBLIC_DOMAINS = ['api.txproof.xyz'];
 
 function isInternalRequest(req: Request): boolean {
     const host = req.get('host') || '';
-    // Strip port for localhost check
     const hostname = host.split(':')[0];
     return INTERNAL_DOMAINS.includes(hostname);
 }
 
+/**
+ * SaaS Governance Middleware (STRICT)
+ * 
+ * Responsibilities:
+ * 1. Authenticate (JWT or API Key)
+ * 2. Resolve 'apiKeyId' (System or User Key)
+ * 3. Enforce Quota (Increment Usage)
+ * 4. Reject ANYTHING that fails 1, 2, or 3.
+ */
 export const saasMiddleware = async (req: Request, res: Response, next: NextFunction) => {
     const isInternal = isInternalRequest(req);
     const authHeader = req.headers['authorization'];
     const apiKeyHeader = req.headers['x-api-key'];
 
-    // Auth State
-    let authContext: 'user' | 'api_key' | null = null;
     let quotaResult = null;
-    let resourceId = '';
 
     try {
         // =================================================================
-        // TRUST ZONE 1: INTERNAL (First-Party)
+        // PATH A: INTERNAL / JWT
         // =================================================================
-        if (isInternal) {
-            // Requirement 1: MUST be JWT
-            const isApiKey = authHeader?.startsWith('Bearer sk_') || authHeader?.startsWith('Bearer tx_p_');
-            if (!authHeader?.startsWith('Bearer ') || isApiKey) {
-                // If they try to use an API key internally -> BLOCK
-                if (apiKeyHeader || isApiKey) {
-                    return res.status(403).json({
-                        code: 'AUTH_MISMATCH',
-                        error: 'API Keys are not accepted on internal endpoints. Use JWT.'
-                    });
-                }
-                return res.status(401).json({ code: 'MISSING_AUTH', error: 'Authentication Required (JWT)' });
-            }
-
-            // Verify JWT
+        if (isInternal && authHeader?.startsWith('Bearer ') && !authHeader?.includes('sk_')) {
+            // 1. Verify JWT
             const token = authHeader.split(' ')[1];
+
             try {
-                // Lazy Load to avoid circular deps if any
+                // Dynamic import to break potential cycle if AuthService imports middleware
                 const { AuthService } = require('../services/AuthService');
                 const authService = new AuthService();
                 const payload = authService.verifyToken(token);
 
-                if (!payload || !payload.id) {
-                    throw new Error('Invalid Token Payload');
-                }
-
-                // Attach Context
                 (req as AuthenticatedRequest).user = {
                     id: payload.id,
                     wallet_address: payload.wallet_address,
                     role: payload.role
                 };
 
-                authContext = 'user';
-                resourceId = payload.id;
+                // 2. INJECT SYSTEM KEY
+                const sysKeyId = await apiKeyService.getSystemApiKeyId();
+                (req as AuthenticatedRequest).apiKeyId = sysKeyId;
 
-            } catch (e) {
-                return res.status(401).json({ code: 'INVALID_TOKEN', error: 'Invalid or Expired Session' });
+                // 3. Increment Usage (Unlimited, but tracked)
+                // We use incrementApiKeyUsage even for system to keep tracking consistent
+                quotaResult = await usageService.incrementApiKeyUsage(sysKeyId, 1);
+
+            } catch (e: any) {
+                return res.status(401).json({ code: 'AUTH_FAILED', error: 'Invalid JWT' });
             }
-
-            // Strict Ban Check (Database Hit)
-            const { data: userStatus } = await import('../lib/supabase').then(m => m.supabase
-                .from('users')
-                .select('account_status')
-                .eq('id', (req as AuthenticatedRequest).user?.id) // Safe access after assignment
-                .single()
-            );
-
-            if (userStatus && userStatus.account_status !== 'active') {
-                return res.status(403).json({
-                    code: 'ACCOUNT_SUSPENDED',
-                    error: `Your account has been ${userStatus.account_status}. Contact support.`
-                });
-            }
-
-            // Check User Quota
-            quotaResult = await usageService.incrementUserUsage(resourceId, 1);
         }
 
         // =================================================================
-        // TRUST ZONE 2: PUBLIC (Developer API)
+        // PATH B: EXTERNAL / API KEY
         // =================================================================
         else {
-            // Requirement 2: MUST be API Key
             let key = '';
             if (apiKeyHeader) {
                 key = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
-            } else if (authHeader?.startsWith('Bearer sk_') || authHeader?.startsWith('Bearer tx_p_')) {
-                // Support both legacy sk_ and new tx_p_ prefixes
+            } else if (authHeader?.startsWith('Bearer ')) {
                 key = authHeader.slice(7);
-            } else {
-                // If they try to use JWT externally -> BLOCK
-                if (authHeader?.startsWith('Bearer ')) {
-                    return res.status(403).json({
-                        code: 'AUTH_MISMATCH',
-                        error: 'JWT Authentication is not accepted on Public API. Use X-API-Key.'
-                    });
-                }
-                return res.status(401).json({ code: 'MISSING_API_KEY', error: 'X-API-Key Header Required' });
             }
 
+            if (!key) {
+                return res.status(401).json({ code: 'MISSING_KEY', error: 'API Key Required (X-API-Key)' });
+            }
+
+            // 1. Verify Key
             const details = await apiKeyService.verifyKey(key);
             if (!details) {
-                return res.status(401).json({ code: 'INVALID_API_KEY', error: 'Invalid or Inactive API Key' });
+                return res.status(401).json({ code: 'INVALID_KEY', error: 'Invalid API Key' });
             }
 
-            // Attach Context
             (req as AuthenticatedRequest).auth = details;
 
-            authContext = 'api_key';
-            resourceId = details.id;
+            // 2. Attach ID
+            const keyId = details.id;
+            (req as AuthenticatedRequest).apiKeyId = keyId;
 
-            // Check API Key Quota
-            quotaResult = await usageService.incrementApiKeyUsage(resourceId, 1);
+            // 3. Enforce Quota
+            quotaResult = await usageService.incrementApiKeyUsage(keyId, 1);
         }
 
         // =================================================================
-        // QUOTA ENFORCEMENT & HEADERS
+        // STRICT ENFORCEMENT
         // =================================================================
         if (!quotaResult) {
-            return res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Quota Check Failed' });
+            return res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Usage tracking failed' });
         }
 
         res.setHeader('X-Quota-Limit', quotaResult.limit);
@@ -148,27 +114,14 @@ export const saasMiddleware = async (req: Request, res: Response, next: NextFunc
         if (!quotaResult.allowed) {
             return res.status(429).json({
                 code: 'QUOTA_EXCEEDED',
-                error: isInternal
-                    ? 'Monthly usage limit reached. Contact support to increase standard quota.'
-                    : 'Plan quota exceeded. Please upgrade your plan.'
+                error: 'Monthly quota exceeded. Upgrade your plan.'
             });
         }
 
-        // =================================================================
-        // LOGGING (Fire & Forget)
-        // =================================================================
-        const start = Date.now();
-        res.on('finish', () => {
-            const duration = Date.now() - start;
-            // TODO: Update AnalyticsService to handle 'user' scope logs if needed
-            // For now, only logging API Key traffic or adapt AnalyticsService later
-            // analyticsService.trackRequest(...)
-        });
-
         next();
 
-    } catch (error) {
-        console.error('Middleware Critical Error:', error);
-        res.status(500).json({ code: 'INTERNAL_AUTH_ERROR', error: 'Internal Auth Error' });
+    } catch (error: any) {
+        console.error('SaaS Middleware Error:', error);
+        res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Authentication Error' });
     }
 };

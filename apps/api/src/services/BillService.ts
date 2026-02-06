@@ -5,6 +5,7 @@ import { PriceOracleService } from './PriceOracleService';
 import { TemplateService } from './TemplateService'; // [NEW]
 import { transactionClassifier, ClassificationResult, ExecutionType, TransactionEnvelopeType } from './TransactionClassifier';
 import { AdminService } from './AdminService';
+import { UserService } from './UserService';
 import { ERC20_ABI, ERC721_ABI, ERC1155_ABI } from '../abis/Common';
 import QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
@@ -1047,54 +1048,40 @@ export class BillService {
         return 'Legacy';
     }
     private async saveToDb(txHash: string, chainId: number, wallet: string, data: BillViewModel, isConfirmed: boolean, receiptHash?: string) {
-        // [IMPROVEMENT] Auto-create user if missing to avoid FK error
-        // minimizing logs and ensuring data consistency.
-        if (wallet) {
-            try {
-                // Try to create the user (idempotent)
-                const { error } = await supabase.from('users').upsert(
-                    { wallet_address: wallet },
-                    { onConflict: 'wallet_address', ignoreDuplicates: true } // Don't overwrite existing
-                );
-                if (error) console.warn('[BillService] Failed to auto-create user:', error.message);
-            } catch (uErr) {
-                // Ignore, proceed to save bill
-            }
+        let userId: string | null = null;
+
+        try {
+            // Unified Identity Handling
+            const userService = new UserService();
+            // Default to Anonymous/System user if wallet is missing for some reason
+            const targetWallet = wallet || '0x0000000000000000000000000000000000000000';
+            userId = await userService.ensureUser(targetWallet);
+        } catch (e: any) {
+            console.error('[BillService] Failed to ensure user identity', e);
+            // Proceeding with null userId might be safer than crashing the ingest, 
+            // but strictly we prefer data integrity.
         }
 
         try {
-            await this.performUpsert(txHash, chainId, wallet, data, isConfirmed);
+            await this.performUpsert(txHash, chainId, userId, data, isConfirmed, receiptHash);
         } catch (e: any) {
-            // If it still fails (e.g. unknown chain), log and retry without wallet as last resort
-            console.warn('[BillService] Save failed. Retrying without wallet linkage...', e.code);
-            try {
-                await this.performUpsert(txHash, chainId, null, data, isConfirmed);
-            } catch (retryError: any) {
-                if (retryError.code === 'P0001') {
-                    // Constraint violation: Bill already exists/immutable. This is fine.
-                    console.log('[BillService] Bill is already finalized (P0001). Skipping DB update.');
-                } else {
-                    console.error('[BillService] CRITICAL: Failed to save to DB cache even without wallet.', retryError);
-                }
-            }
+            console.error('[BillService] Bill save failed', e);
         }
     }
 
-    private async performUpsert(txHash: string, chainId: number, wallet: string | null, data: BillViewModel, isConfirmed: boolean, receiptHash?: string) {
+    private async performUpsert(txHash: string, chainId: number, userId: string | null, data: BillViewModel, isConfirmed: boolean, receiptHash?: string) {
         const payload: any = {
             bill_id: data.BILL_ID, // Required JSON ID
             tx_hash: txHash,
             chain_id: chainId,
             bill_json: data,
             status: isConfirmed ? 'COMPLETED' : 'PENDING',
-            receipt_hash: receiptHash || null, // [NEW]
-            updated_at: new Date().toISOString()
+            receipt_hash: receiptHash || null,
+            updated_at: new Date().toISOString(),
+            user_id: userId // [NEW] Canonical Link
         };
 
-        // Only include wallet_address if explicitly provided and not null
-        if (wallet) {
-            payload.wallet_address = wallet;
-        }
+        // Removed legacy 'wallet_address' assignment as column is dropped
 
         const { error } = await supabase.from('bills').upsert(payload, { onConflict: 'tx_hash,chain_id' });
         if (error) throw error;

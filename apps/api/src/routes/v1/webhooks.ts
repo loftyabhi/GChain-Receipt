@@ -30,12 +30,24 @@ const createWebhookSchema = z.object({
 // GET /api/v1/webhooks
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
+        // If user has no keys, they can't have webhooks. Return empty list.
+        const authReq = req as AuthenticatedRequest;
+        if (authReq.user?.id) {
+            const key = await apiKeyService.getActiveKeyForUser(authReq.user.id);
+            if (!key) {
+                return res.json([]);
+            }
+            const hooks = await webhookService.listWebhooks(key.id);
+            return res.json(hooks);
+        }
+
         const apiKeyId = await resolveApiKeyId(req as AuthenticatedRequest);
         const hooks = await webhookService.listWebhooks(apiKeyId);
         res.json(hooks);
     } catch (e: any) {
         if (e.message.includes('No active API key')) {
-            res.status(400).json({ error: 'No active API key found. Please create one first.' });
+            // Should have been caught above, but just in case
+            res.json([]);
         } else {
             next(e);
         }

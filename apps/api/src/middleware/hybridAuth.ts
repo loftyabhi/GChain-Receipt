@@ -1,67 +1,15 @@
 /**
- * Hybrid Authentication Middleware
+ * Hybrid Authentication Middleware (STRICT MODE)
  * 
- * Implements a non-breaking security model:
- * - If API key is provided: Full SaaS governance (auth, rate limit, quota)
- * - If no API key: Public rate limiting (graceful degradation)
+ * PREVIOUSLY: Allowed downgrade to public rate limiting if no key was present.
+ * STRICT UPDATE: DOWNGRADE REMOVED.
  * 
- * Enterprise customers ALWAYS go through full governance.
+ * All traffic reaching this middleware MUST be authenticated via strict SaaS rules.
+ * We simply alias to saasMiddleware now to enforce the "Strict Key" invariant.
+ * 
+ * Keeping the file to avoid breaking imports, but behavior is now STRICT.
  */
-import { Request, Response, NextFunction } from 'express';
-import { saasMiddleware, AuthenticatedRequest } from './saasAuth';
-import { strictRateLimiter } from './publicRateLimiter';
+import { saasMiddleware } from './saasAuth';
 
-/**
- * Hybrid middleware that checks for API key presence.
- * - With key: saasMiddleware (full governance)
- * - Without key: strictRateLimiter (public throttle)
- */
-export const hybridAuth = (req: Request, res: Response, next: NextFunction) => {
-    const authHeader = req.headers['authorization'];
-
-    // AGGRESSIVE CHECK:
-    // If they send ANY Authorization header that looks like it might be an API key,
-    // we force them through the SaaS governance layer.
-    // This prevents "downgrade attacks" where a user sends a malformed header
-    // (e.g. missing 'Bearer ') to slip into the public tier (which ignores bans).
-    const isAuthAttempt = authHeader && (
-        authHeader.toLowerCase().includes('bearer') ||
-        authHeader.includes('sk_')
-    );
-
-    if (isAuthAttempt) {
-        // Full SaaS Governance Path
-        return saasMiddleware(req, res, next);
-    } else {
-        // Public Path with Rate Limiting
-        return strictRateLimiter(req, res, next);
-    }
-};
-
-/**
- * Mark request as public (for logging/analytics)
- */
-export interface HybridRequest extends Request {
-    isPublicRequest?: boolean;
-    auth?: AuthenticatedRequest['auth'];
-}
-
-/**
- * Enhanced hybrid middleware with request tagging
- */
-export const hybridAuthWithTracking = (req: Request, res: Response, next: NextFunction) => {
-    const authHeader = req.headers['authorization'];
-
-    const isAuthAttempt = authHeader && (
-        authHeader.toLowerCase().includes('bearer') ||
-        authHeader.includes('sk_')
-    );
-
-    if (isAuthAttempt) {
-        (req as HybridRequest).isPublicRequest = false;
-        return saasMiddleware(req, res, next);
-    } else {
-        (req as HybridRequest).isPublicRequest = true;
-        return strictRateLimiter(req, res, next);
-    }
-};
+export const hybridAuth = saasMiddleware;
+export const hybridAuthWithTracking = saasMiddleware;

@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from 'crypto';
 import { supabase } from '../lib/supabase';
+import { UserService } from './UserService';
 
 export interface ApiKeyDetails {
     id: string;
-    owner_id: string;
+    // owner_id: string; // REMOVED (Legacy)
     plan: {
         id: string;
         name: string;
@@ -17,6 +18,28 @@ export interface ApiKeyDetails {
 }
 
 export class ApiKeyService {
+    private static systemKeyId: string | null = null;
+
+    /**
+     * Resolve the internal System API Key ID.
+     * Caches the result to minimize DB hits.
+     */
+    async getSystemApiKeyId(): Promise<string> {
+        if (ApiKeyService.systemKeyId) return ApiKeyService.systemKeyId;
+
+        const { data } = await supabase
+            .from('api_keys')
+            .select('id')
+            .eq('prefix', 'sys_')
+            .single();
+
+        if (data) {
+            ApiKeyService.systemKeyId = data.id;
+            return data.id;
+        }
+
+        throw new Error('CRITICAL: System API Key (sys_) not found. Run strict migration.');
+    }
 
     /**
      * Generate a new API Key.
@@ -24,30 +47,9 @@ export class ApiKeyService {
      */
     async createKey(ownerId: string, planName: 'Free' | 'Pro' | 'Enterprise' = 'Free', options?: { ownerUserId?: string }) {
         // 0. Ensure User Record Exists (Unify Identity)
-        let userId = options?.ownerUserId;
-
-        if (!userId) {
-            // Look up existing user by wallet address
-            const { data: existingUser } = await supabase
-                .from('users')
-                .select('id')
-                .eq('wallet_address', ownerId.toLowerCase())
-                .single();
-
-            if (existingUser) {
-                userId = existingUser.id;
-            } else {
-                // Auto-create user record for new wallet
-                const { data: newUser, error: userError } = await supabase
-                    .from('users')
-                    .insert({ wallet_address: ownerId.toLowerCase() })
-                    .select('id')
-                    .single();
-
-                if (userError) throw new Error(`Failed to create user: ${userError.message}`);
-                userId = newUser.id;
-            }
-        }
+        // We defer strictly to UserService for canonical identity handling.
+        const userService = new UserService();
+        const userId = options?.ownerUserId || await userService.ensureUser(ownerId);
 
         // 1. Get Plan ID
         const { data: plan } = await supabase
@@ -70,7 +72,7 @@ export class ApiKeyService {
             .insert({
                 key_hash: hash,
                 prefix: prefix,
-                owner_id: ownerId,
+                // owner_id: ownerId, // REMOVED
                 owner_user_id: userId,  // ✅ ALWAYS SET - Ensures unified tracking
                 plan_id: plan.id,
                 plan_tier: planName,
@@ -83,16 +85,32 @@ export class ApiKeyService {
 
         if (error) throw error;
 
+        // 4. Update User Primary Key (Consistency Link)
+        if (userId) {
+            // Check if user has primary key set
+            const { data: user } = await supabase
+                .from('users')
+                .select('primary_api_key_id')
+                .eq('id', userId)
+                .single();
+
+            // If no primary key is set, or if we want to force update (optional logic, sticking to first-set for now)
+            if (user && !user.primary_api_key_id) {
+                await supabase
+                    .from('users')
+                    .update({ primary_api_key_id: data.id })
+                    .eq('id', userId);
+            }
+        }
+
         return {
             id: data.id,
-            key: rawKey,
-            prefix
+            apiKey: rawKey,
+            plan: planName,
+            quota: plan.monthly_quota
         };
     }
 
-    /**
-     * Authenticate a request.
-     */
     async verifyKey(rawKey: string): Promise<ApiKeyDetails | null> {
         const hash = createHash('sha256').update(rawKey).digest('hex');
 
@@ -100,7 +118,6 @@ export class ApiKeyService {
             .from('api_keys')
             .select(`
                 id,
-                owner_id,
                 owner_user_id,
                 environment,
                 permissions,
@@ -123,14 +140,13 @@ export class ApiKeyService {
 
         // 1. Hard Abuse Validation
         if (data.abuse_flag) {
-            console.warn(`[Security] Blocked abuse - flagged key: ${data.id} `);
+            console.warn(`[Security] Blocked abuse - flagged key: ${data.id}`);
             return null;
         }
 
         if (!data.is_active) return null;
 
         // 2. Strict Account Ban Check
-        // All keys now have owner_user_id, so we can simplify this check
         let ownerStatus = 'active';
 
         if (data.owner_user_id) {
@@ -143,14 +159,13 @@ export class ApiKeyService {
         }
 
         if (ownerStatus !== 'active') {
-            console.warn(`[Security] Blocked key ${data.id} because owner is ${ownerStatus} `);
+            console.warn(`[Security] Blocked key ${data.id} because owner is ${ownerStatus}`);
             return null; // Implicit 401/403 downstream
         }
 
         // Flatten checks
         return {
             id: data.id,
-            owner_id: data.owner_id,
             environment: data.environment,
             permissions: data.permissions,
             ipAllowlist: data.ip_allowlist,
@@ -158,29 +173,25 @@ export class ApiKeyService {
         };
     }
 
-    /**
-     * Find an active key for a user (for Dashboard/JWT usage).
-     */
     async getActiveKeyForUser(userId: string): Promise<ApiKeyDetails | null> {
         const { data, error } = await supabase
             .from('api_keys')
             .select(`
-        id,
-            owner_id,
-            environment,
-            permissions,
-            is_active,
-            ip_allowlist,
-            abuse_flag,
-            plan: plans(
                 id,
-                name,
-                rate_limit_rps,
-                monthly_quota,
-                max_burst,
-                priority_level
-            )
-                `)
+                environment,
+                permissions,
+                is_active,
+                ip_allowlist,
+                abuse_flag,
+                plan: plans(
+                    id,
+                    name,
+                    rate_limit_rps,
+                    monthly_quota,
+                    max_burst,
+                    priority_level
+                )
+            `)
             .eq('owner_user_id', userId)
             .eq('is_active', true)
             .limit(1)
@@ -192,7 +203,6 @@ export class ApiKeyService {
 
         return {
             id: data.id,
-            owner_id: data.owner_id,
             environment: data.environment,
             permissions: data.permissions,
             ipAllowlist: data.ip_allowlist,
@@ -200,10 +210,6 @@ export class ApiKeyService {
         };
     }
 
-    /**
-     * Check if key has quota remaining and increment usage.
-     * Returns detailed object for header injection.
-     */
     /**
      * Check if key has quota remaining and increment usage.
      * Returns detailed object for header injection.
@@ -218,9 +224,9 @@ export class ApiKeyService {
         const { data: keyData, error: keyError } = await supabase
             .from('api_keys')
             .select(`
-        id, quota_limit,
-            plan: plans(monthly_quota, name)
-                `)
+                id, quota_limit,
+                plan: plans(monthly_quota, name)
+            `)
             .eq('id', keyId)
             .single();
 
