@@ -52,7 +52,7 @@ const BATCH_SIZE = 10;
 
 // Payload validation schema
 const WebhookPayloadSchema = z.object({
-    event_type: z.string(),
+    type: z.string(),
     data: z.any(),
     id: z.string().optional(),
     txHash: z.string().optional(),
