@@ -286,7 +286,7 @@ export class WebhookService {
                 headers: {
                     'Content-Type': 'application/json',
                     'X-TxProof-Signature': signature,
-                    'X-TxProof-Event-Type': 'bill.completed',
+                    'X-TxProof-Event': 'bill.completed', // Standardized header
                     'User-Agent': 'TxProof-Webhooks/1.0'
                 },
                 timeout: REQUEST_TIMEOUT_MS,
@@ -319,12 +319,18 @@ export class WebhookService {
             webhookLogger.error('Test webhook failed', {
                 webhookId: id,
                 url: webhook.url,
-                error: error.message
+                error: error.message,
+                response: error.response?.data
             });
+
+            // Capture the actual response body from the receiver if available
+            const responseData = error.response?.data ?
+                (typeof error.response.data === 'object' ? JSON.stringify(error.response.data) : String(error.response.data))
+                : '';
 
             return {
                 success: false,
-                error: error.message || 'Network error',
+                error: responseData || error.message || 'Network error',
                 responseTime,
                 payload: samplePayload
             };
@@ -346,7 +352,7 @@ export class WebhookService {
         try {
             // Validate payload structure
             const validatedPayload = WebhookPayloadSchema.parse({
-                event_type: eventType,
+                type: eventType, // Renamed from event_type
                 data: payload,
                 ...payload
             });
@@ -636,7 +642,11 @@ export class WebhookService {
             const nextRetry = new Date(Date.now() + backoffMs).toISOString();
 
             const responseStatus = error.response?.status || 0;
-            const errorMessage = error.message || 'Unknown error';
+            // Capture the actual response body from the receiver if available
+            const responseData = error.response?.data ?
+                (typeof error.response.data === 'object' ? JSON.stringify(error.response.data) : String(error.response.data))
+                : '';
+            const errorMessage = responseData || error.message || 'Unknown error';
 
             await supabase
                 .from('webhook_events')
