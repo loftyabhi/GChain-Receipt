@@ -8,7 +8,9 @@ import {
     decryptSecret,
     signWebhookPayload,
     verifyWebhookSignature,
-    canonicalStringify
+    canonicalStringify,
+    getActiveKeyVersion,
+    verifySecretIntegrity
 } from '../lib/cryptography';
 import { logger, createComponentLogger } from '../lib/logger';
 
@@ -22,6 +24,11 @@ export interface Webhook {
     secret_iv: string;
     secret_tag: string;
     secret_last4: string;
+    encryption_key_version: string;
+    health_status: 'active' | 'broken' | 'rotated';
+    last_health_check?: string;
+    health_error?: string;
+    rotated_at?: string;
     events: string[];
     is_active: boolean;
     created_at: string;
@@ -98,8 +105,9 @@ export class WebhookService {
         const secret = generateSecureSecret();
         const secretLast4 = secret.slice(-4);
 
-        // 3. Encrypt secret using AES-256-GCM
-        const { encrypted, iv, tag } = encryptSecret(secret);
+        // 3. Encrypt secret using AES-256-GCM with versioned key
+        const activeVersion = getActiveKeyVersion();
+        const { encrypted, iv, tag, version } = encryptSecret(secret, activeVersion);
 
         // 4. Insert webhook
         const { data, error } = await supabase
@@ -111,6 +119,9 @@ export class WebhookService {
                 secret_iv: iv,
                 secret_tag: tag,
                 secret_last4: secretLast4,
+                encryption_key_version: version,
+                health_status: 'active',
+                last_health_check: new Date().toISOString(),
                 events,
                 is_active: true
             })
@@ -161,6 +172,67 @@ export class WebhookService {
         }
 
         webhookLogger.info('Webhook deleted', { webhookId: id });
+    }
+
+    /**
+     * securely rotate webhook secret
+     * Generates new secret with ACTIVE key version
+     * Archives old secret (implicitly, by replacing it)
+     */
+    async rotateWebhookSecret(id: string, apiKeyId: string) {
+        // 1. Fetch current webhook to verify ownership
+        const { data: webhook, error: fetchError } = await supabase
+            .from('webhooks')
+            .select('*')
+            .eq('id', id)
+            .eq('api_key_id', apiKeyId)
+            .single();
+
+        if (fetchError || !webhook) {
+            throw new Error('Webhook not found');
+        }
+
+        // 2. Generate new cryptographically secure secret
+        const secret = generateSecureSecret();
+        const secretLast4 = secret.slice(-4);
+        const activeVersion = getActiveKeyVersion();
+
+        // 3. Encrypt with CURRENT active key version
+        const { encrypted, iv, tag, version } = encryptSecret(secret, activeVersion);
+
+        // 4. Atomic update
+        const { data, error } = await supabase
+            .from('webhooks')
+            .update({
+                secret_encrypted: encrypted,
+                secret_iv: iv,
+                secret_tag: tag,
+                secret_last4: secretLast4,
+                encryption_key_version: version,
+                // Reset health status on rotation
+                health_status: 'active',
+                health_error: null,
+                last_health_check: new Date().toISOString(),
+                rotated_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .eq('api_key_id', apiKeyId)
+            .select()
+            .single();
+
+        if (error) {
+            webhookLogger.error('Failed to rotate secret', { webhookId: id, error: error.message });
+            throw error;
+        }
+
+        webhookLogger.info('Webhook secret rotated', {
+            webhookId: id,
+            keyVersion: version,
+            previousVersion: webhook.encryption_key_version
+        });
+
+        return { webhook: data, secret };
     }
 
     /**
@@ -234,6 +306,7 @@ export class WebhookService {
                 statusCode: response.status,
                 responseTime,
                 payload: samplePayload,
+                payload_canonical: canonicalStringify(samplePayload),
                 response: typeof response.data === 'string'
                     ? response.data
                     : JSON.stringify(response.data)
@@ -394,12 +467,104 @@ export class WebhookService {
     }
 
     /**
+     * Decrypt webhook secret with integrity verification AND health check
+     * @throws Error if encryption/integrity check fails
+     */
+    private async getVerifiedSecret(webhook: any): Promise<string> {
+        try {
+            // Decrypt using stored key version (default to v1 for legacy)
+            const secret = decryptSecret(
+                webhook.secret_encrypted,
+                webhook.secret_iv,
+                webhook.secret_tag,
+                webhook.encryption_key_version || 'v1'
+            );
+
+            // CRITICAL: Verify integrity against DB record
+            const integrityValid = verifySecretIntegrity(
+                secret,
+                webhook.secret_last4
+            );
+
+            if (!integrityValid) {
+                // Fail hard: Mark broken, stop delivery for this webhook
+                await this.markWebhookBroken(
+                    webhook.id,
+                    'Secret integrity check failed - internal mismatch'
+                );
+
+                throw new Error(
+                    `Webhook ${webhook.id} failed integrity check - marked as broken`
+                );
+            }
+
+            return secret;
+
+        } catch (error: any) {
+            webhookLogger.error('Secret verification failed', {
+                webhookId: webhook.id,
+                error: error.message,
+                keyVersion: webhook.encryption_key_version
+            });
+
+            // If decryption failed entirely (e.g. wrong key), mark broken
+            if (!webhook.health_status || webhook.health_status === 'active') {
+                await this.markWebhookBroken(
+                    webhook.id,
+                    `Decryption failed: ${error.message}`
+                );
+            }
+
+            throw error;
+        }
+    }
+
+    /**
+     * Mark webhook as broken and stop delivery
+     */
+    private async markWebhookBroken(webhookId: string, reason: string) {
+        await supabase
+            .from('webhooks')
+            .update({
+                health_status: 'broken',
+                health_error: reason,
+                last_health_check: new Date().toISOString(),
+                // NOTE: We do NOT set is_active: false based on policy
+                // Delivery logic checks health_status explicitly
+            })
+            .eq('id', webhookId);
+
+        webhookLogger.error('Webhook marked as broken', {
+            webhookId,
+            reason
+        });
+    }
+
+    /**
      * Deliver a single webhook event with retry logic
      */
     private async deliverEvent(event: any) {
         const webhook = event.webhooks;
         if (!webhook) {
             webhookLogger.error('Webhook not found for event', { eventId: event.id });
+            return;
+        }
+
+        // CRITICAL: Check health status before delivery attempts
+        // We decouple 'is_active' (user intent) from 'health_status' (system health)
+        if (webhook.health_status === 'broken') {
+            webhookLogger.warn('Skipping delivery - webhook is broken', {
+                webhookId: webhook.id,
+                error: webhook.health_error
+            });
+
+            await supabase
+                .from('webhook_events')
+                .update({
+                    status: 'failed',
+                    response_body: `Webhook broken: ${webhook.health_error}`
+                })
+                .eq('id', event.id);
             return;
         }
 
@@ -416,12 +581,8 @@ export class WebhookService {
             .eq('id', event.id);
 
         try {
-            // 1. Decrypt webhook secret
-            const secret = decryptSecret(
-                webhook.secret_encrypted,
-                webhook.secret_iv,
-                webhook.secret_tag
-            );
+            // 1. Get verified secret (includes decryption + integrity check)
+            const secret = await this.getVerifiedSecret(webhook);
 
             // 2. Sign payload with canonical JSON + timestamp
             const signature = signWebhookPayload(event.payload, secret);
@@ -449,6 +610,8 @@ export class WebhookService {
                     status: 'success',
                     response_status: response.status,
                     response_body: JSON.stringify(response.data).slice(0, 1000),
+                    // Store canonical payload that was actually signed/sent
+                    payload_canonical: canonicalStringify(event.payload),
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', event.id);

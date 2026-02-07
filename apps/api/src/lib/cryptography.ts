@@ -73,6 +73,42 @@ export function verifyReceiptHash(billData: any, expectedHash: string): {
  * Generate cryptographically secure webhook secret
  * Uses crypto.randomBytes instead of Math.random
  */
+
+/**
+ * Get encryption key by version
+ * Supports multiple keys for rotation (v1, v2, etc.)
+ */
+function getEncryptionKey(version: string = 'v1'): string {
+    const envKey = `WEBHOOK_ENCRYPTION_KEY_${version.toUpperCase()}`;
+    let key = process.env[envKey];
+
+    // Fallback to legacy key for v1
+    if (!key && version === 'v1') {
+        key = process.env.WEBHOOK_ENCRYPTION_KEY;
+    }
+
+    if (!key) {
+        throw new Error(`Encryption key ${version} not configured in ${envKey}`);
+    }
+
+    if (key.length !== 64) {
+        throw new Error(`Invalid encryption key ${version}: must be 64 hex characters`);
+    }
+
+    return key;
+}
+
+/**
+ * Get active encryption key version from environment
+ */
+export function getActiveKeyVersion(): string {
+    return process.env.WEBHOOK_ENCRYPTION_KEY_ACTIVE || 'v1';
+}
+
+/**
+ * Generate cryptographically secure webhook secret
+ * Uses crypto.randomBytes instead of Math.random
+ */
 export function generateSecureSecret(): string {
     const crypto = require('crypto');
     const randomBytes = crypto.randomBytes(32);
@@ -84,25 +120,31 @@ export function generateSecureSecret(): string {
  * Encrypt webhook secret using AES-256-GCM
  * Requires WEBHOOK_ENCRYPTION_KEY environment variable
  */
-export function encryptSecret(plaintext: string): {
+/**
+ * Encrypt webhook secret using AES-256-GCM with versioned keys
+ * Returns ciphertext, IV, authentication tag, and key version
+ */
+export function encryptSecret(
+    secret: string,
+    version?: string
+): {
     encrypted: string;
     iv: string;
     tag: string;
+    version: string;
 } {
     const crypto = require('crypto');
     const algorithm = 'aes-256-gcm';
 
-    const key = process.env.WEBHOOK_ENCRYPTION_KEY;
-    if (!key || key.length !== 64) {
-        throw new Error('WEBHOOK_ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
-    }
-
+    // Use provided version or get active version from env
+    const keyVersion = version || getActiveKeyVersion();
+    const key = getEncryptionKey(keyVersion);
     const keyBuffer = Buffer.from(key, 'hex');
-    const iv = crypto.randomBytes(16);
 
+    const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(algorithm, keyBuffer, iv);
 
-    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+    let encrypted = cipher.update(secret, 'utf8', 'hex');
     encrypted += cipher.final('hex');
 
     const tag = cipher.getAuthTag();
@@ -110,22 +152,24 @@ export function encryptSecret(plaintext: string): {
     return {
         encrypted,
         iv: iv.toString('hex'),
-        tag: tag.toString('hex')
+        tag: tag.toString('hex'),
+        version: keyVersion
     };
 }
 
 /**
- * Decrypt webhook secret
+ * Decrypt webhook secret using stored key version
  */
-export function decryptSecret(encrypted: string, iv: string, tag: string): string {
+export function decryptSecret(
+    encrypted: string,
+    iv: string,
+    tag: string,
+    version: string = 'v1'
+): string {
     const crypto = require('crypto');
     const algorithm = 'aes-256-gcm';
 
-    const key = process.env.WEBHOOK_ENCRYPTION_KEY;
-    if (!key) {
-        throw new Error('WEBHOOK_ENCRYPTION_KEY not set');
-    }
-
+    const key = getEncryptionKey(version);
     const keyBuffer = Buffer.from(key, 'hex');
     const ivBuffer = Buffer.from(iv, 'hex');
     const tagBuffer = Buffer.from(tag, 'hex');
@@ -137,6 +181,27 @@ export function decryptSecret(encrypted: string, iv: string, tag: string): strin
     decrypted += decipher.final('utf8');
 
     return decrypted;
+}
+
+/**
+ * Verify secret integrity - CRITICAL security check
+ * Ensures decrypted secret matches expected last 4 characters
+ * @returns true if integrity verified, false otherwise
+ */
+export function verifySecretIntegrity(
+    decryptedSecret: string,
+    expectedLast4: string
+): boolean {
+    if (!decryptedSecret || decryptedSecret.length < 4) {
+        return false;
+    }
+
+    if (!expectedLast4 || expectedLast4.length !== 4) {
+        return false;
+    }
+
+    const actualLast4 = decryptedSecret.slice(-4);
+    return actualLast4 === expectedLast4;
 }
 
 /**

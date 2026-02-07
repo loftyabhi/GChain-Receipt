@@ -1175,6 +1175,27 @@ router.get('/webhooks/events/:eventId/debug', async (req: Request, res: Response
                 secret_last4: event.webhooks.secret_last4,
             },
 
+            // Encryption & Integrity Diagnostics
+            integrity: (() => {
+                try {
+                    const { decryptSecret, verifySecretIntegrity } = require('../../lib/cryptography');
+                    const secret = decryptSecret(
+                        event.webhooks.secret_encrypted,
+                        event.webhooks.secret_iv,
+                        event.webhooks.secret_tag,
+                        event.webhooks.encryption_key_version || 'v1'
+                    );
+                    const isValid = verifySecretIntegrity(secret, event.webhooks.secret_last4);
+                    return {
+                        status: isValid ? 'healthy' : 'integrity_failure',
+                        key_version: event.webhooks.encryption_key_version,
+                        check_timestamp: new Date().toISOString()
+                    };
+                } catch (e: any) {
+                    return { status: 'decryption_failed', error: e.message };
+                }
+            })(),
+
             // Delivery information
             delivery: {
                 webhook_url: event.webhooks.url,
@@ -1190,6 +1211,72 @@ router.get('/webhooks/events/:eventId/debug', async (req: Request, res: Response
 
     } catch (e: any) {
         logger.error('Webhook debug error', { error: e.message, eventId: req.params.eventId });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// GET /api/v1/admin/debug/webhook/:id
+// Diagnosis endpoint for support staff
+router.get('/debug/webhook/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+
+        // Fetch raw webhook record with all metadata
+        const { data: webhook, error } = await supabase
+            .from('webhooks')
+            .select(`
+                *,
+                api_keys ( name, owner_id, users(email) ),
+                webhook_events ( count )
+            `)
+            .eq('id', id)
+            .single();
+
+        if (error || !webhook) {
+            res.status(404).json({ error: 'Webhook not found' });
+            return;
+        }
+
+        // Check encryption health
+        let encryptionHealth = 'unknown';
+        let decryptedLast4 = 'unknown';
+
+        try {
+            const { decryptSecret, verifySecretIntegrity } = require('../../lib/cryptography');
+            const secret = decryptSecret(
+                webhook.secret_encrypted,
+                webhook.secret_iv,
+                webhook.secret_tag,
+                webhook.encryption_key_version || 'v1'
+            );
+
+            decryptedLast4 = secret.slice(-4);
+            const isValid = verifySecretIntegrity(secret, webhook.secret_last4);
+            encryptionHealth = isValid ? 'healthy' : 'integrity_failure';
+        } catch (err: any) {
+            encryptionHealth = `decryption_failed: ${err.message}`;
+        }
+
+        res.json({
+            webhook: {
+                ...webhook,
+                // NEVER return full secret, even to admins
+                secret_encrypted: '[REDACTED]',
+                secret: `...${decryptedLast4}`
+            },
+            diagnostics: {
+                encryption_health: encryptionHealth,
+                key_version: webhook.encryption_key_version,
+                stored_last4: webhook.secret_last4,
+                actual_last4: decryptedLast4,
+                health_status: webhook.health_status,
+                last_check: webhook.last_health_check,
+                active_key_version: process.env.WEBHOOK_ENCRYPTION_KEY_ACTIVE || 'v1'
+            }
+        });
+
+    } catch (e: any) {
+        logger.error('Webhook debug error', { error: e.message, webhookId: req.params.id });
         res.status(500).json({ error: e.message });
     }
 });

@@ -9,6 +9,9 @@ interface Webhook {
     url: string;
     events: string[];
     is_active: boolean;
+    health_status: 'active' | 'broken' | 'rotated';
+    health_error?: string;
+    last_health_check?: string;
     created_at: string;
 }
 
@@ -44,6 +47,10 @@ export const WebhookManager: React.FC<WebhookManagerProps> = ({ token }) => {
 
     // Delete Confirmation State
     const [deleteWebhookId, setDeleteWebhookId] = useState<string | null>(null);
+
+    // Rotate Confirmation State
+    const [rotateWebhookId, setRotateWebhookId] = useState<string | null>(null);
+    const [isRotating, setIsRotating] = useState(false);
 
     const fetchWebhooks = React.useCallback(async () => {
         setIsLoading(true);
@@ -165,6 +172,37 @@ export const WebhookManager: React.FC<WebhookManagerProps> = ({ token }) => {
             toast.error('Error deleting webhook');
         } finally {
             setDeleteWebhookId(null);
+        }
+    };
+
+    const handleRotateClick = (id: string) => {
+        setRotateWebhookId(id);
+    };
+
+    const confirmRotate = async () => {
+        if (!rotateWebhookId) return;
+        setIsRotating(true);
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/webhooks/${rotateWebhookId}/rotate`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                toast.success('Webhook secret rotated');
+                setNewSecret(data.secret); // Reuse new secret modal
+                fetchWebhooks();
+            } else {
+                toast.error(data.error || 'Failed to rotate secret');
+            }
+        } catch (e: any) {
+            toast.error('Error rotating secret');
+        } finally {
+            setIsRotating(false);
+            setRotateWebhookId(null);
         }
     };
 
@@ -391,22 +429,42 @@ export const WebhookManager: React.FC<WebhookManagerProps> = ({ token }) => {
                     </div>
                 ) : (
                     webhooks.map(wh => (
-                        <div key={wh.id} className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div key={wh.id} className={`bg-white/5 border rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 ${wh.health_status === 'broken' ? 'border-red-500/30 bg-red-500/5' : 'border-white/10'
+                            }`}>
                             <div className="overflow-hidden">
                                 <div className="flex items-center gap-2 mb-1">
                                     <span className="font-mono text-sm text-blue-300 truncate max-w-md" title={wh.url}>{wh.url}</span>
-                                    <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-xs">Active</span>
+
+                                    {/* Status Badges */}
+                                    {wh.health_status === 'active' && (
+                                        <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-xs flex items-center gap-1">
+                                            <CheckCircle2 size={10} /> Active
+                                        </span>
+                                    )}
+                                    {wh.health_status === 'broken' && (
+                                        <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-xs flex items-center gap-1 font-bold">
+                                            <XCircle size={10} /> Broken
+                                        </span>
+                                    )}
+                                    {wh.health_status === 'rotated' && (
+                                        <span className="px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">Rotated</span>
+                                    )}
                                 </div>
                                 <div className="flex gap-2 text-xs text-gray-500">
                                     <span>Events: {wh.events.join(', ')}</span>
                                     <span>•</span>
                                     <span>Created {new Date(wh.created_at).toLocaleDateString()}</span>
                                 </div>
+                                {wh.health_status === 'broken' && wh.health_error && (
+                                    <div className="mt-2 text-xs text-red-400 bg-red-950/30 p-2 rounded border border-red-900/50">
+                                        <strong>Delivery Stopped:</strong> {wh.health_error}
+                                    </div>
+                                )}
                             </div>
                             <div className="flex gap-3">
                                 <button
                                     onClick={() => handleTest(wh.id)}
-                                    disabled={testingWebhookId === wh.id}
+                                    disabled={testingWebhookId === wh.id || wh.health_status === 'broken'}
                                     className="text-xs text-gray-400 hover:text-white border border-transparent hover:border-white/10 px-3 py-1.5 rounded transition disabled:opacity-50 flex items-center gap-1"
                                 >
                                     {testingWebhookId === wh.id ? (
@@ -421,6 +479,14 @@ export const WebhookManager: React.FC<WebhookManagerProps> = ({ token }) => {
                                         </>
                                     )}
                                 </button>
+
+                                <button
+                                    onClick={() => handleRotateClick(wh.id)}
+                                    className="text-xs text-yellow-500/80 hover:text-yellow-400 border border-transparent hover:border-yellow-500/20 hover:bg-yellow-500/10 px-3 py-1.5 rounded transition"
+                                >
+                                    Rotate Secret
+                                </button>
+
                                 <button
                                     onClick={() => handleDeleteClick(wh.id)}
                                     className="text-xs text-red-400 hover:text-red-300 border border-transparent hover:border-red-500/20 hover:bg-red-500/10 px-3 py-1.5 rounded transition"

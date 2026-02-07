@@ -370,6 +370,51 @@ export default async function handler(req, res) {
                 </div>
             </div>
 
+            {/* --- SECRET MANAGEMENT --- */}
+            <div className="space-y-6 pt-6">
+                <h2 className="text-2xl font-bold border-b pb-2">Secret Management</h2>
+                <p className="text-muted-foreground">
+                    Your webhook secret is the key to verifying the integrity of events. Keep it secure.
+                </p>
+
+                <div className="space-y-4">
+                    <h3 className="font-semibold text-lg">Rotation</h3>
+                    <p className="text-muted-foreground">
+                        If you believe your secret has been compromised, you can rotate it immediately via the Dashboard or API.
+                        Rotation invalidates the old secret instantly and generates a new cryptographically secure secret.
+                    </p>
+                    <div className="bg-muted p-4 rounded-md">
+                        <h4 className="font-semibold text-sm uppercase mb-2">Impact of Rotation</h4>
+                        <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
+                            <li><strong>Immediate:</strong> The old secret will stop working instantly.</li>
+                            <li><strong>Health Reset:</strong> Rotating a "Broken" webhook will reset its status to "Active".</li>
+                            <li><strong>Zero Downtime:</strong> If you update your server configuration immediately, you miss no events.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div className="space-y-4 pt-4">
+                    <h3 className="font-semibold text-lg">Health Status</h3>
+                    <p className="text-muted-foreground">
+                        TxProof monitors the health of your webhook configuration.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="border p-4 rounded-md bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
+                            <div className="font-bold text-green-700 dark:text-green-400 mb-1">Active</div>
+                            <div className="text-xs text-muted-foreground">Everything is working correctly. Events are being delivered.</div>
+                        </div>
+                        <div className="border p-4 rounded-md bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800">
+                            <div className="font-bold text-red-700 dark:text-red-400 mb-1">Broken</div>
+                            <div className="text-xs text-muted-foreground">Integrity check failed. Delivery is paused for security. <br /><strong>Action:</strong> Rotate secret immediately.</div>
+                        </div>
+                        <div className="border p-4 rounded-md bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+                            <div className="font-bold text-blue-700 dark:text-blue-400 mb-1">Rotated</div>
+                            <div className="text-xs text-muted-foreground">Secret was recently changed. Update your server config.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* --- TROUBLESHOOTING --- */}
             <div className="space-y-6 pt-6">
                 <h2 className="text-2xl font-bold border-b pb-2">Troubleshooting</h2>

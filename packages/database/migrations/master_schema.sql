@@ -305,7 +305,7 @@ CREATE INDEX IF NOT EXISTS idx_bills_api_key ON bills(api_key_id);
 -- 5. ASYNC & QUEUE SYSTEMS
 -- -----------------------------------------------------------------------------
 
--- 5.1 WEBHOOKS (Encrypted configs)
+-- 5.1 WEBHOOKS (Encrypted configs with versioned keys and health monitoring)
 CREATE TABLE IF NOT EXISTS webhooks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     api_key_id UUID REFERENCES api_keys(id) ON DELETE CASCADE,
@@ -314,12 +314,21 @@ CREATE TABLE IF NOT EXISTS webhooks (
     secret_iv TEXT NOT NULL,
     secret_tag TEXT NOT NULL,
     secret_last4 TEXT NOT NULL,
+    encryption_key_version TEXT DEFAULT 'v1' NOT NULL CHECK (encryption_key_version IN ('v1', 'v2')),
+    health_status TEXT DEFAULT 'active' 
+        CHECK (health_status IN ('active', 'broken', 'rotated')),
+    last_health_check TIMESTAMPTZ,
+    health_error TEXT,
+    rotated_at TIMESTAMPTZ,
     events TEXT[] NOT NULL DEFAULT '{}',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT webhooks_url_check CHECK (url ~ '^https://.*')
 );
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_health ON webhooks(health_status) WHERE health_status != 'active';
+CREATE INDEX IF NOT EXISTS idx_webhooks_key_version ON webhooks(encryption_key_version);
 
 -- 5.2 WEBHOOK EVENTS (Delivery log)
 CREATE TABLE IF NOT EXISTS webhook_events (
@@ -328,6 +337,7 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     webhook_id UUID REFERENCES webhooks(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL,
     payload JSONB NOT NULL,
+    payload_canonical TEXT,
     status TEXT CHECK (status IN ('pending', 'processing', 'success', 'failed')) DEFAULT 'pending',
     response_status INT,
     response_body TEXT,

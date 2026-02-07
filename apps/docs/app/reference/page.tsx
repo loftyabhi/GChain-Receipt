@@ -157,6 +157,30 @@ export default function Reference() {
                 <Endpoint method="DELETE" path="/api/v1/webhooks/:id">
                     <p className="text-muted-foreground">Delete a webhook subscription.</p>
                 </Endpoint>
+
+                {/* POST /webhooks/:id/rotate */}
+                <Endpoint method="POST" path="/api/v1/webhooks/:id/rotate">
+                    <div className="space-y-6">
+                        <p className="text-muted-foreground leading-relaxed">
+                            Rotates the signing secret for a webhook. This invalidates the old secret immediately.
+                            <br /><strong>Note:</strong> Returns the new secret only once.
+                        </p>
+                        <Tabs items={[
+                            {
+                                label: 'Response',
+                                value: 'res',
+                                content: <CodeBlock language="json" code={`{
+  "webhook": { 
+    "id": "wh_123", 
+    "url": "https://...", 
+    "health_status": "active" 
+  },
+  "secret": "whsec_..." 
+}`} />
+                            }
+                        ]} />
+                    </div>
+                </Endpoint>
             </div>
 
 
