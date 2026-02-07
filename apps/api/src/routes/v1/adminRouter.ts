@@ -1077,4 +1077,121 @@ router.get('/email/stats', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * GET /api/v1/admin/webhooks/events/:eventId/debug
+ * Webhook Debug Mode (Security-First Debugging)
+ * 
+ * Security Features:
+ * - Time-bound: Only events from last 7 days
+ * - No Secret Exposure: Shows only last 4 characters
+ * - Header Redaction: Filters out auth headers
+ * - Payload Hash: SHA-256 instead of raw payload
+ */
+router.get('/webhooks/events/:eventId/debug', async (req: Request, res: Response) => {
+    try {
+        const { eventId } = req.params;
+        const actorId = (req as any).user?.address || 'admin';
+
+        // Security: Time-bound access (7 days only)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+        // Fetch event with webhook details
+        const { data: event, error } = await supabase
+            .from('webhook_events')
+            .select(`
+                *,
+                webhooks!inner(
+                    id,
+                    url,
+                    secret_last4,
+                    api_key_id
+                )
+            `)
+            .eq('id', eventId)
+            .gte('created_at', sevenDaysAgo)
+            .single();
+
+        if (error || !event) {
+            return res.status(404).json({
+                error: 'Event not found or older than 7 days'
+            });
+        }
+
+        // Compute payload hash (security: never expose raw payload)
+        const payloadString = JSON.stringify(event.payload);
+        const crypto = require('crypto');
+        const payloadHash = crypto
+            .createHash('sha256')
+            .update(payloadString)
+            .digest('hex');
+
+        // Parse signature from stored data (if available)
+        let timestamp: number | undefined;
+        let signatureReceived: string | undefined;
+
+        // Try to extract from response_body if it contains debug info
+        // In production, we should store this separately
+        // For now, this is a placeholder
+        timestamp = Math.floor(new Date(event.created_at).getTime() / 1000);
+
+        // Safe headers (security: redact auth headers)
+        const SAFE_HEADERS = [
+            'user-agent',
+            'content-type',
+            'x-txproof-signature',
+            'x-txproof-event',
+            'x-txproof-event-id'
+        ];
+
+        // Redact headers if available
+        const safeHeaders = event.headers
+            ? Object.entries(event.headers as Record<string, string>)
+                .filter(([key]) => SAFE_HEADERS.includes(key.toLowerCase()))
+                .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {})
+            : { note: 'Headers not stored for this event' };
+
+        // Audit log the debug access
+        await auditService.log({
+            actorId,
+            action: 'WEBHOOK_DEBUG_ACCESSED',
+            targetId: eventId,
+            metadata: { event_type: event.event_type },
+            ip: req.ip
+        });
+
+        res.json({
+            event_id: event.event_id,
+            event_type: event.event_type,
+            created_at: event.created_at,
+            status: event.status,
+            attempt_count: event.attempt_count,
+
+            // Debug information
+            debug: {
+                timestamp,
+                signature_algorithm: 'v1',
+                payload_hash: `sha256:${payloadHash}`,
+                payload_length: payloadString.length,
+                secret_last4: event.webhooks.secret_last4,
+            },
+
+            // Delivery information
+            delivery: {
+                webhook_url: event.webhooks.url,
+                attempt_count: event.attempt_count,
+                last_response_status: event.response_status,
+                last_response_preview: event.response_body?.substring(0, 200) || 'No response',
+                next_retry_at: event.next_retry_at,
+            },
+
+            // Safe headers only (security: redacted)
+            headers_sent: safeHeaders,
+        });
+
+    } catch (e: any) {
+        logger.error('Webhook debug error', { error: e.message, eventId: req.params.eventId });
+        res.status(500).json({ error: e.message });
+    }
+});
+
 export default router;
