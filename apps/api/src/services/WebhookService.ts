@@ -424,7 +424,7 @@ export class WebhookService {
             // 1. Fetch pending events that are ready for delivery
             const { data: events } = await supabase
                 .from('webhook_events')
-                .select('*, webhooks!inner(url, secret_encrypted, secret_iv, secret_tag)')
+                .select('*, webhooks!inner(id, url, secret_encrypted, secret_iv, secret_tag, secret_last4, encryption_key_version, health_status)')
                 .in('status', ['pending', 'processing'])
                 .lt('next_retry_at', new Date().toISOString())
                 .limit(BATCH_SIZE);
