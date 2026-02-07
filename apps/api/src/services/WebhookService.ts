@@ -52,7 +52,7 @@ const BATCH_SIZE = 10;
 
 // Payload validation schema
 const WebhookPayloadSchema = z.object({
-    type: z.string(),
+    event_type: z.string(),
     data: z.any(),
     id: z.string().optional(),
     txHash: z.string().optional(),
@@ -254,7 +254,7 @@ export class WebhookService {
         // 2. Create sample payload
         const samplePayload = {
             id: `test_${Date.now()}`,
-            type: 'bill.completed',
+            event_type: 'bill.completed',
             created_at: new Date().toISOString(),
             data: {
                 bill_id: 'bill_test_123456',
@@ -352,7 +352,7 @@ export class WebhookService {
         try {
             // Validate payload structure
             const validatedPayload = WebhookPayloadSchema.parse({
-                type: eventType, // Renamed from event_type
+                event_type: eventType,
                 data: payload,
                 ...payload
             });

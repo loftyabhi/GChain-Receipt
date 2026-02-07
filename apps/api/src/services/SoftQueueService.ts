@@ -164,11 +164,15 @@ export class SoftQueueService {
                 if (job.api_key_id) {
                     this.webhookService.dispatch('bill.completed', {
                         id: job.id,
-                        billId: result.billData.BILL_ID,
-                        txHash: job.tx_hash,
-                        chainId: job.chain_id,
+                        bill_id: result.billData.BILL_ID,
+                        tx_hash: job.tx_hash,
+                        transaction_hash: job.tx_hash,
+                        chain_id: job.chain_id,
                         status: 'completed',
-                        durationMs: duration
+                        duration_ms: duration,
+                        // Maintain camelCase for top-level spread in WebhookService
+                        txHash: job.tx_hash,
+                        billId: result.billData.BILL_ID
                     }, job.api_key_id).catch(err => console.error('[Webhook] Dispatch Error:', err));
                 }
 
@@ -189,10 +193,13 @@ export class SoftQueueService {
                 if (job.api_key_id) {
                     this.webhookService.dispatch('bill.failed', {
                         id: job.id,
-                        txHash: job.tx_hash,
-                        chainId: job.chain_id,
+                        tx_hash: job.tx_hash,
+                        transaction_hash: job.tx_hash,
+                        chain_id: job.chain_id,
                         status: 'failed',
-                        error: err.message
+                        error: err.message,
+                        // Maintain camelCase for top-level spread
+                        txHash: job.tx_hash
                     }, job.api_key_id).catch(err => console.error('[Webhook] Dispatch Error:', err));
                 }
             } finally {
